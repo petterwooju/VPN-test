@@ -239,7 +239,7 @@ def stop_session(signum, frame):
     raise KeyboardInterrupt
 
 
-def run_session(iphone=None, allow_lan=False):
+def run_session(iphone=None, allow_lan=False, state_dir=None):
     if os.getuid() == 0:
         raise RuntimeError("일반 사용자로 실행하고, 실행 중 표시되는 sudo 요청만 승인하세요.")
     lan = wifi_lan_configuration(iphone) if allow_lan or iphone is not None else ()
@@ -247,7 +247,11 @@ def run_session(iphone=None, allow_lan=False):
         raise RuntimeError(f"이 Mac용 중계기의 기준 Wi-Fi DNS는 {ORIGINAL_DNS}입니다.")
 
     relay_file = Path(__file__).resolve().with_name("relay.py")
-    state = Path(tempfile.mkdtemp(prefix="puma-dns-", dir="/private/tmp"))
+    if state_dir is None:
+        state = Path(tempfile.mkdtemp(prefix="puma-dns-", dir="/private/tmp"))
+    else:
+        state = Path(state_dir).resolve()
+        state.mkdir(mode=0o700, parents=False, exist_ok=False)
     heartbeat = state / "heartbeat"
     print("중계기 로그 " + str(state / "relay.log"), flush=True)
     subprocess.run(["/usr/bin/sudo", "-v"], check=True)
@@ -314,6 +318,8 @@ def run_session(iphone=None, allow_lan=False):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="CoreaVPN DNS 중계기")
+    parser.add_argument("--state-dir", type=Path,
+                        help="New private session directory for an offline runner's recovery watchdog")
     clients = parser.add_mutually_exclusive_group()
     clients.add_argument("--lan", action="store_true", help="현재 Wi-Fi IPv4 서브넷의 기기에 DNS 제공")
     clients.add_argument(
@@ -332,7 +338,7 @@ if __name__ == "__main__":
                     args.iphone = input("아이폰 IPv4 ‘IP 주소’ (공유기 주소와 다름): ").strip()
                 except EOFError:
                     sys.exit("터미널에서 아이폰의 IPv4 주소를 입력하세요.")
-            run_session(args.iphone, allow_lan=args.lan)
+            run_session(args.iphone, allow_lan=args.lan, state_dir=args.state_dir)
     except KeyboardInterrupt:
         sys.exit(130)
     except (OSError, RuntimeError, subprocess.SubprocessError) as error:
