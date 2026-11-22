@@ -46,7 +46,8 @@ def event(run, stage, **data):
 
 
 def ui(plan, *args):
-    return json.loads(command([plan["ui"], *args], timeout=18))
+    calibration = ["--fl-map", plan["fl_map"]] if plan.get("fl_map") else []
+    return json.loads(command([plan["ui"], *calibration, *args], timeout=18))
 
 
 def vpn(plan, action, *args):
@@ -170,6 +171,8 @@ def watchdog(run, owner, deadline):
 
 def prepare(args):
     plan = dict(ui=str(args.ui.resolve()), vpn_index=args.vpn_index, vpn_count=args.vpn_count)
+    if args.fl_map:
+        plan["fl_map"] = str(args.fl_map.resolve())
     if not Path(plan["ui"]).is_file():
         raise RuntimeError("Compile the local UI helper before preparation")
     plan["flclash"] = ui(plan, "fl-state")
@@ -201,8 +204,7 @@ def pilot(run, plan):
         with (run / "relay-console.txt").open("w") as file:
             relay = subprocess.Popen(["/usr/bin/python3", "-I",
                 str(SKILL / "assets/Puma-DNS/session.py"), "--state-dir", str(run / "relay-state")],
-                stdin=subprocess.DEVNULL, stdout=file, stderr=subprocess.STDOUT,
-                start_new_session=True)
+                stdin=subprocess.DEVNULL, stdout=file, stderr=subprocess.STDOUT)
         def ready():
             if relay.poll() is not None:
                 raise RuntimeError("Relay exited before readiness; see relay-console.txt")
@@ -249,6 +251,7 @@ def pilot(run, plan):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--ui", type=Path)
+    parser.add_argument("--fl-map", type=Path, help="Optional calibration from a live FlClash screenshot")
     parser.add_argument("--vpn-index", type=int, help="Zero-based switch index verified in the live VPN UI")
     parser.add_argument("--vpn-count", type=int)
     parser.add_argument("--log-dir", type=Path, required=True)
