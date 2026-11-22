@@ -1,0 +1,12 @@
+---
+name: coreavpn-macos
+description: Use Codex Computer Use to connect and disconnect existing macOS CoreaVPN IKEv2 profiles, measure ping through their tunnels, or diagnose the Puma DNS relay and verify recovery. Use for a Puma pilot, five-round calibration, or 100ms and fastest-server searches on the user's Macs.
+---
+
+Use the Mac that owns the VPN profiles. Use Computer Use for System Settings and FlClash, and shell commands for measurements and state checks. The workflow uses macOS's own VPN client. The Apple Shortcuts VPN profile picker crashed on the original Mac, and `scutil --nc` could not enumerate those profiles, so drive the existing profiles through System Settings.
+
+1. Read [Mac workflow and recovery](references/macos-workflow.md). Before changing anything, create the run log and recovery note and capture the current Wi-Fi DNS, route, VPN status, relay and FlClash state. Treat existing network sessions as user state. If an unrelated VPN conflicts, leave its controls alone and ask the user to disconnect it.
+2. Use the existing Puma profile by default for a pilot. Match the exact profile from the live UI, check its domain and remote ID, and confirm it is off before starting. For a temporary, authorized edit, record both values and restore them after the test. Do not extract, echo, or log credentials. Any required administrator password goes directly into the Mac's Terminal.
+3. For .net use the existing verified local relay or the compatible bundled copy. Confirm a real Puma DNS answer before stopping FlClash. Use the UI to connect, observe the named profile as connected, and confirm the route to `168.126.63.1` uses the IKEv2 interface. Then run [the ping helper](scripts/vpn-ping.py) for 20 probes. Write failures with ping unmeasured when the tunnel was never established.
+4. For a pilot or measurement, disconnect the tested profile and verify routing. Stop the relay started for the test, verify the pre-relay DNS value, and restore FlClash's original state if it was changed. For an explicitly requested 100ms search that succeeds, keep the qualifying VPN and any required relay running and give the user the stop and recovery path.
+5. Report what was observed, including route, response count, RTT, loss, failures, and DNS restoration status. Keep the log and recovery note available to the user. For all-server runs use [server calibration and ranking](references/macos-workflow.md#server-calibration-and-ranking).

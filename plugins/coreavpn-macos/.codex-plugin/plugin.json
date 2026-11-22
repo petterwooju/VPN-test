@@ -1,0 +1,8 @@
+{
+  "name": "coreavpn-macos",
+  "version": "1.0.0",
+  "description": "Operate existing CoreaVPN profiles on a Mac and measure VPN performance.",
+  "skills": "./skills/",
+  "requires_local_executor": true,
+  "interface": { "displayName": "CoreaVPN macOS" }
+}
