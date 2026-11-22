@@ -146,6 +146,7 @@ def verify_dns(plan):
 
 def watchdog(run, owner, deadline):
     plan = json.loads((run / "plan.json").read_text())
+    (run / "watchdog-ready").touch()
     while time.time() < deadline:
         if (run / "finished").exists():
             return
@@ -288,13 +289,15 @@ def main():
         signal.signal(signal.SIGTERM, stop)
         signal.signal(signal.SIGHUP, stop)
         with (run / "watchdog-console.txt").open("w") as file:
-            subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "--log-dir", str(run),
+            guardian = subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "--log-dir", str(run),
                               "--watchdog", str(os.getpid()), "--deadline", str(time.time() + 180)],
                              stdin=subprocess.DEVNULL, stdout=file, stderr=subprocess.STDOUT,
                              pass_fds=(lock_file.fileno(),),
                              start_new_session=True)
         ok = False
         try:
+            wait_for(lambda: guardian.poll() is None and (run / "watchdog-ready").exists(),
+                     5, "Watchdog did not arm; no network changes made")
             pilot(run, plan)
             ok = True
         except (Exception, KeyboardInterrupt) as error:
