@@ -1,0 +1,12 @@
+{
+  "name": "coreavpn-local",
+  "interface": { "displayName": "CoreaVPN Local" },
+  "plugins": [
+    {
+      "name": "coreavpn-macos",
+      "source": { "source": "local", "path": "./plugins/coreavpn-macos" },
+      "policy": { "installation": "AVAILABLE", "authentication": "ON_INSTALL" },
+      "category": "Productivity"
+    }
+  ]
+}
