@@ -267,6 +267,7 @@ def prepare(args):
     if not Path(plan["ui"]).is_file():
         raise RuntimeError("Compile the local UI helper before preparation")
     plan["route"] = route()
+    ui(plan, "vpn-open", str(plan["vpn_count"]))
     if args.replace_vpn:
         index, name = args.replace_vpn
         plan.update(prior_index=int(index), prior_name=name, proxy_port=args.fl_proxy_port,

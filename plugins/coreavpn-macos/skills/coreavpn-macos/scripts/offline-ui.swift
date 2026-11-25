@@ -207,6 +207,21 @@ func vpnSwitch(_ index: Int, _ count: Int) throws -> AXUIElement {
     guard items.count == count, index >= 0, index < count else { try fail("VPN list changed; recalibrate online") }
     return items[index]
 }
+// A settings URL can return before the window and profile list are published.
+func openVPNPane(expectedCount: Int) throws {
+    guard AXIsProcessTrusted() else { try fail("Accessibility access missing") }
+    let url = URL(string: "x-apple.systempreferences:com.apple.NetworkExtensionSettingsUI.NESettingsUIExtension")!
+    guard NSWorkspace.shared.open(url) else { try fail("Could not open VPN in System Settings") }
+    let deadline = ProcessInfo.processInfo.systemUptime + 10
+    while ProcessInfo.processInfo.systemUptime < deadline {
+        if let root = try? window("com.apple.systempreferences") {
+            guard vpnDetailsSheet(root) == nil else { try fail("Close the open VPN details sheet before starting") }
+            if switches(root).count == expectedCount { return }
+        }
+        Thread.sleep(forTimeInterval: 0.25)
+    }
+    try fail("System Settings did not present a unique VPN window with the expected profile count")
+}
 func closeVPNDetails() throws {
     let root = try window("com.apple.systempreferences")
     guard let sheet = vpnDetailsSheet(root) else { return }
@@ -260,6 +275,10 @@ do {
     }
     guard let action = args.first else { try fail("Expected fl-state, fl-set, vpn-verify, vpn-state, or vpn-set") }
     switch action {
+    case "vpn-open":
+        guard args.count == 2, let count = Int(args[1]), count > 0 else { try fail("Expected VPN profile count") }
+        try openVPNPane(expectedCount: count)
+        try output(["ready": true])
     case "vpn-close": try closeVPNDetails(); try output(["closed": true])
     case "fl-frame": try output(geometry(window("com.follow.clash")))
     case "fl-diagnose":
