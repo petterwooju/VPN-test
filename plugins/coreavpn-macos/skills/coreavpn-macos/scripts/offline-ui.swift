@@ -160,14 +160,19 @@ func flSet(_ key: String, _ desired: Bool) throws {
                 if NSWorkspace.shared.frontmostApplication?.bundleIdentifier == "com.follow.clash" { break }
                 Thread.sleep(forTimeInterval: 0.1)
             }
-            try fallbackClick(root, key)
+            if let element = try? namedSwitch(root, labels: labels) {
+                if try bool(element) != desired { try press(element) }
+            } else {
+                try fallbackClick(root, key)
+            }
         }
     } else {
         let element = try namedSwitch(root, labels: labels)
         if try bool(element) != desired { try press(element) }
     }
     for _ in 0..<20 {
-        if try flState()[key] == desired { return }
+        // macOS applies the HTTP, HTTPS and SOCKS flags in separate updates.
+        if let observed = try? flState(), observed[key] == desired { return }
         Thread.sleep(forTimeInterval: 0.2)
     }
     try fail("FlClash switch did not reach requested state")

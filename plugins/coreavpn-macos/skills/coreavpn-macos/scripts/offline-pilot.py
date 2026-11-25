@@ -89,6 +89,33 @@ def verify_proxy_internet(plan):
         raise RuntimeError(f"Unexpected response from OpenAI over FlClash: {response}")
 
 
+def verify_stable_proxy(run, plan):
+    # A successful explicit curl can coexist with disabled macOS proxy flags.
+    port = str(plan["proxy_port"])
+    stable_since = time.monotonic()
+    deadline = stable_since + 65
+    while time.monotonic() < deadline:
+        settings = dict(re.findall(r"^[ \t]*(\w+)[ \t]*:[ \t]*(\S+)[ \t]*$",
+                                   command(["/usr/sbin/scutil", "--proxy"]), re.M))
+        if not any(settings.get(kind + "Enable") == "1" for kind in ("HTTP", "HTTPS", "SOCKS")):
+            ui(plan, "fl-set", "proxy", "on")
+            event(run, "reapplied-system-proxy")
+            stable_since = time.monotonic()
+        else:
+            for kind in ("HTTP", "HTTPS", "SOCKS"):
+                if (settings.get(kind + "Enable") != "1"
+                        or settings.get(kind + "Proxy") not in ("127.0.0.1", "localhost", "::1")
+                        or settings.get(kind + "Port") != port):
+                    raise RuntimeError("Unexpected macOS proxy settings for " + kind)
+            if time.monotonic() - stable_since >= 30:
+                verify_fl(plan)
+                verify_proxy_internet(plan)
+                event(run, "system-proxy-stable", seconds=30)
+                return
+        time.sleep(2)
+    raise RuntimeError("System proxy did not remain enabled for 30 seconds")
+
+
 def dns(service="Wi-Fi"):
     value = command(["/usr/sbin/networksetup", "-getdnsservers", service])
     if "AuthorizationCreate" in value or not value:
@@ -180,7 +207,7 @@ def recover(run, plan):
         if plan.get("verify_off_vpn"):
             attempt("verify-excluded-vpn-off", lambda: verify_excluded_vpn(plan))
         if replaced_vpn or plan.get("cycle_fl_engine"):
-            attempt("verify-flclash-internet", lambda: verify_proxy_internet(plan))
+            attempt("verify-stable-flclash-proxy", lambda: verify_stable_proxy(run, plan))
         attempt("verify-final-dns", lambda: verify_dns(run, plan))
         attempt("record-final-route", lambda: event(run, "final-route", interface=route()))
         result = dict(ok=not errors, errors=errors)

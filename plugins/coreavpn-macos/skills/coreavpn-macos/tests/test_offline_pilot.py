@@ -91,6 +91,27 @@ class RecoveryTests(unittest.TestCase):
             self.assertTrue(pilot.recover(self.run, self.plan))
         self.assertTrue((self.run / "dns-restored").exists())
 
+    def test_system_proxy_has_to_stay_on_after_it_is_reapplied(self):
+        self.plan["proxy_port"] = 7890
+        now = [0]
+        on = "\n".join(f"{kind}{field} : {value}"
+                       for kind in ("HTTP", "HTTPS", "SOCKS")
+                       for field, value in (("Enable", 1), ("Proxy", "127.0.0.1"), ("Port", 7890)))
+        def settings(_):
+            return "HTTPEnable : 0" if now[0] == 8 else on
+
+        def advance(seconds):
+            now[0] += seconds
+
+        with patch.object(pilot.time, "monotonic", side_effect=lambda: now[0]), \
+             patch.object(pilot.time, "sleep", side_effect=advance), \
+             patch.object(pilot, "command", side_effect=settings), \
+             patch.object(pilot, "ui") as change, \
+             patch.object(pilot, "verify_fl"), patch.object(pilot, "verify_proxy_internet"):
+            pilot.verify_stable_proxy(self.run, self.plan)
+        change.assert_called_once_with(self.plan, "fl-set", "proxy", "on")
+        self.assertEqual(now[0], 38)
+
     def test_engine_restarted_before_tun_and_proxy(self):
         self.plan["cycle_fl_engine"] = True
         (self.run / "engine-stop-sent").touch()
@@ -98,13 +119,13 @@ class RecoveryTests(unittest.TestCase):
             self.calls.append(("start-engine",))
 
         with patch.object(pilot, "restore_engine", side_effect=start), \
-             patch.object(pilot, "verify_proxy_internet") as verify_internet:
+             patch.object(pilot, "verify_stable_proxy") as verify_internet:
             self.assertTrue(self.recovered())
 
         self.assertEqual(self.calls[:3], [
             ("start-engine",), ("fl-set", "tun", "on"), ("fl-set", "proxy", "off")
         ])
-        verify_internet.assert_called_once_with(self.plan)
+        verify_internet.assert_called_once_with(self.run, self.plan)
 
     def test_engine_cycle_stops_engine_without_toggling_settings(self):
         self.plan.update(cycle_fl_engine=True, device="en6", service="Ethernet", proxy_port=7890)
