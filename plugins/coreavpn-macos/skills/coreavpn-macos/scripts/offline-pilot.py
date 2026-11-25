@@ -153,7 +153,11 @@ def recover(run, plan):
             if (run / "relay-touched").exists():
                 state.mkdir(mode=0o700, exist_ok=True)
                 (state / "stop").touch()
-                wait_for(lambda: dns(plan.get("service", "Wi-Fi")) == plan["dns"], 18, "DNS restoration could not be verified")
+                restored = run / "dns-restored"
+                if not restored.exists():
+                    wait_for(lambda: dns(plan.get("service", "Wi-Fi")) == plan["dns"], 18,
+                             "DNS restoration could not be verified")
+                    restored.touch()
 
         attempt("disconnect-test-vpn", disconnect)
         attempt("restore-dns", stop_relay)
@@ -171,7 +175,7 @@ def recover(run, plan):
                     raise RuntimeError("Previous VPN is still connected")
             attempt("verify-previous-vpn-off", verify_prior_off)
             attempt("verify-flclash-internet", lambda: verify_proxy_internet(plan))
-        attempt("verify-final-dns", lambda: verify_dns(plan))
+        attempt("verify-final-dns", lambda: verify_dns(run, plan))
         attempt("record-final-route", lambda: event(run, "final-route", interface=route()))
         result = dict(ok=not errors, errors=errors)
         save(run / "recovered.json", result)
@@ -184,9 +188,13 @@ def verify_fl(plan):
         raise RuntimeError("FlClash restoration mismatch")
 
 
-def verify_dns(plan):
-    if dns(plan.get("service", "Wi-Fi")) != plan["dns"]:
-        raise RuntimeError("Final DNS differs from baseline")
+def verify_dns(run, plan):
+    current = dns(plan.get("service", "Wi-Fi"))
+    if current == "127.0.0.1":
+        raise RuntimeError("The temporary relay is still configured")
+    # Starting FlClash may apply its own DNS configuration after relay cleanup.
+    if not (run / "dns-restored").exists() and current != plan["dns"]:
+        raise RuntimeError("DNS restoration to baseline was not verified")
 
 
 def watchdog(run, owner, deadline):

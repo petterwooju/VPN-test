@@ -29,7 +29,7 @@ For the real run use a different, new log directory and append `--run`. The scri
 
 The runner starts a detached watchdog before network changes, starts its own local-only relay, validates a public Puma IPv4 answer, turns off the saved FlClash proxy/TUN switches, and verifies routing over the saved physical interface and disabled proxy flags. It then connects only the preverified Puma profile and allows 30 seconds for its switch and `ipsecN` route. Only a verified tunnel gets 20 bound ping probes.
 
-Success, failure, signals and the 180-second watchdog all lead to recovery: disconnect the touched Puma profile, request stop of this run's relay, verify the original DNS, and restore each saved FlClash switch independently. One failed cleanup step does not skip the others. Recovery is serialized; a failed recovery can be retried with:
+Success, failure, signals and the 180-second watchdog all lead to recovery: disconnect the touched Puma profile, request stop of this run's relay, verify the original DNS, and restore each saved FlClash switch independently. The runner records that the original DNS was observed before restoring FlClash. FlClash may then apply its own DNS. The final check verifies that DNS no longer points at the temporary relay. One failed cleanup step does not skip the others. Recovery is serialized; a failed recovery can be retried with:
 
 ```bash
 python3 /absolute/skill/scripts/offline-pilot.py \

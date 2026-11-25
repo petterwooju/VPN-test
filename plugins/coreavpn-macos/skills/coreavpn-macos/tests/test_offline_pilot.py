@@ -83,6 +83,14 @@ class RecoveryTests(unittest.TestCase):
         self.assertFalse(self.recovered(dns="127.0.0.1"))
         self.assertEqual(self.fl, self.plan["flclash"])
 
+    def test_flclash_dns_change_after_verified_relay_cleanup(self):
+        (self.run / "relay-touched").touch()
+        with patch.object(pilot, "dns", side_effect=[self.plan["dns"], "1.1.1.1"]), \
+             patch.object(pilot, "ui", side_effect=self.ui), \
+             patch.object(pilot, "route", return_value="utun4"):
+            self.assertTrue(pilot.recover(self.run, self.plan))
+        self.assertTrue((self.run / "dns-restored").exists())
+
     def test_pilot_cleans_up_after_flclash_toggle_fails(self):
         # Relay readiness succeeds, first proxy mutation fails.
         fake_relay = Mock()

@@ -311,11 +311,10 @@ def run_session(iphone=None, allow_lan=False, state_dir=None):
             controller.wait(timeout=60)
         except subprocess.TimeoutExpired:
             print("자동 복구를 기다리는 중입니다. 안내서의 복구 명령으로 확인할 수 있습니다.", file=sys.stderr)
-    if current_dns() != ORIGINAL_DNS:
-        raise RuntimeError(
-            "Wi-Fi DNS 원복을 확인하지 못했습니다. "
-            "Check the original DNS of the selected service."
-        )
+    # The controller verifies restoration before exiting. FlClash may already
+    # have applied its own DNS by the time this supervising process resumes.
+    if controller.returncode != 0:
+        raise RuntimeError("DNS 중계기 종료 및 원복을 확인하지 못했습니다.")
     if not interrupted:
         raise RuntimeError("중계기가 종료됐습니다. Wi-Fi DNS는 원래 값입니다.")
     print(f"Wi-Fi DNS {ORIGINAL_DNS} 복구 확인.", flush=True)
