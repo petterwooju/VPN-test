@@ -47,15 +47,50 @@ def event(run, stage, **data):
 
 def ui(plan, *args):
     calibration = ["--fl-map", plan["fl_map"]] if plan.get("fl_map") else []
-    return json.loads(command([plan["ui"], *calibration, *args], timeout=18))
+    r = subprocess.run([plan["ui"], *calibration, *args], capture_output=True,
+                       text=True, stdin=subprocess.DEVNULL, timeout=18)
+    if r.returncode:
+        raise RuntimeError(f"offline-ui {args[0]} failed: {r.stderr.strip()[:400]}")
+    return json.loads(r.stdout)
 
 
 def vpn(plan, action, *args):
     return ui(plan, "vpn-" + action, str(plan["vpn_index"]), str(plan["vpn_count"]), *args)
 
 
-def dns():
-    value = command(["/usr/sbin/networksetup", "-getdnsservers", "Wi-Fi"])
+def prior_vpn(plan, action, *args):
+    return ui(plan, "vpn-" + action, str(plan["prior_index"]), str(plan["vpn_count"]), *args)
+
+
+def fl_proxy_listening(plan):
+    import socket
+    try:
+        with socket.create_connection(("127.0.0.1", plan["proxy_port"]), timeout=1):
+            return True
+    except OSError:
+        return False
+
+
+def restore_engine(run, plan):
+    if not fl_proxy_listening(plan):
+        # A retry must not send another toggle while the first start is pending.
+        if not (run / "engine-start-sent").exists():
+            (run / "engine-start-sent").touch()
+            ui(plan, "fl-engine-start")
+        wait_for(lambda: fl_proxy_listening(plan), 12, "FlClash proxy port did not open")
+
+
+def verify_proxy_internet(plan):
+    response = command(["/usr/bin/curl", "--silent", "--show-error", "--max-time", "10",
+                        "--proxy", f"http://127.0.0.1:{plan['proxy_port']}", "--noproxy", "",
+                        "--output", "/dev/null", "--write-out", "%{http_code}",
+                        "https://api.openai.com/v1/models"])
+    if response != "401":
+        raise RuntimeError(f"Unexpected response from OpenAI over FlClash: {response}")
+
+
+def dns(service="Wi-Fi"):
+    value = command(["/usr/sbin/networksetup", "-getdnsservers", service])
     if "AuthorizationCreate" in value or not value:
         raise RuntimeError("DNS baseline unavailable")
     return value
@@ -118,15 +153,24 @@ def recover(run, plan):
             if (run / "relay-touched").exists():
                 state.mkdir(mode=0o700, exist_ok=True)
                 (state / "stop").touch()
-                wait_for(lambda: dns() == plan["dns"], 18, "DNS restoration could not be verified")
+                wait_for(lambda: dns(plan.get("service", "Wi-Fi")) == plan["dns"], 18, "DNS restoration could not be verified")
 
         attempt("disconnect-test-vpn", disconnect)
         attempt("restore-dns", stop_relay)
+        if plan.get("prior_name") and (run / "prior-vpn-touched").exists():
+            attempt("start-flclash-engine", lambda: restore_engine(run, plan))
         # Do not skip connectivity recovery when disconnect/DNS checks fail.
-        for key in ("tun", "proxy"):
+        for key in (("tun", "proxy") if not plan.get("prior_name") or (run / "prior-vpn-touched").exists() else ()):
             attempt("restore-flclash-" + key,
                     lambda key=key: ui(plan, "fl-set", key, "on" if plan["flclash"][key] else "off"))
-        attempt("verify-flclash", lambda: verify_fl(plan))
+        if not plan.get("prior_name") or (run / "prior-vpn-touched").exists():
+            attempt("verify-flclash", lambda: verify_fl(plan))
+        if plan.get("prior_name") and (run / "prior-vpn-touched").exists():
+            def verify_prior_off():
+                if prior_vpn(plan, "verify-name", plan["prior_name"])["on"]:
+                    raise RuntimeError("Previous VPN is still connected")
+            attempt("verify-previous-vpn-off", verify_prior_off)
+            attempt("verify-flclash-internet", lambda: verify_proxy_internet(plan))
         attempt("verify-final-dns", lambda: verify_dns(plan))
         attempt("record-final-route", lambda: event(run, "final-route", interface=route()))
         result = dict(ok=not errors, errors=errors)
@@ -141,7 +185,7 @@ def verify_fl(plan):
 
 
 def verify_dns(plan):
-    if dns() != plan["dns"]:
+    if dns(plan.get("service", "Wi-Fi")) != plan["dns"]:
         raise RuntimeError("Final DNS differs from baseline")
 
 
@@ -175,22 +219,32 @@ def prepare(args):
         plan["fl_map"] = str(args.fl_map.resolve())
     if not Path(plan["ui"]).is_file():
         raise RuntimeError("Compile the local UI helper before preparation")
-    plan["flclash"] = ui(plan, "fl-state")
+    plan["route"] = route()
+    if args.replace_vpn:
+        index, name = args.replace_vpn
+        plan.update(prior_index=int(index), prior_name=name, proxy_port=args.fl_proxy_port,
+                    flclash={"tun": True, "proxy": True})
+        if not plan["route"].startswith("ipsec") or plan["prior_index"] == plan["vpn_index"]:
+            raise RuntimeError("Expected a separate active IKEv2 profile")
+        if not prior_vpn(plan, "verify-name", name)["on"]:
+            raise RuntimeError("The specified previous VPN is disconnected")
+        ui(plan, "fl-engine-check")
+        if not proxies_off() or fl_proxy_listening(plan):
+            raise RuntimeError("Expected a stopped FlClash engine and inactive system proxy")
+    elif plan["route"].startswith("ipsec"):
+        raise RuntimeError(f"이미 IKEv2 VPN({plan['route']})이 연결되어 있습니다. 시스템 설정 → VPN에서 현재 프로필을 확인하세요.")
+    if not args.replace_vpn:
+        plan["flclash"] = ui(plan, "fl-state")
     if vpn(plan, "verify", SERVER)["on"]:
         raise RuntimeError("Puma must be disconnected before the pilot")
-    plan["dns"] = dns()
-    # The bundled relay supports this baseline only. Never overwrite another baseline.
-    if plan["dns"] != "223.5.5.5":
-        raise RuntimeError("Bundled relay requires the existing manual 223.5.5.5 baseline")
-    ports = command(["/usr/sbin/networksetup", "-listallhardwareports"])
-    if not re.search(r"Hardware Port: Wi-Fi\s+Device: en0\b", ports):
-        raise RuntimeError("Bundled relay requires Wi-Fi on en0")
+    import runpy
+    uplink = runpy.run_path(str(SKILL / "assets/Puma-DNS/uplink.py"))
+    plan["device"], plan["service"] = uplink["active_link"]()
+    plan["dns"] = dns(plan["service"])
+    uplink["resolver_settings"](plan["service"], plan["device"], plan["dns"])
     listeners = command(["/usr/sbin/lsof", "-nP", "-iUDP:53", "-iTCP:53"], check=False)
     if listeners:
         raise RuntimeError("An existing DNS listener must be identified before running")
-    plan["route"] = route()
-    if plan["route"].startswith("ipsec"):
-        raise RuntimeError("An unrelated IKEv2 session is active")
     plan["proxy_baseline"] = command(["/usr/sbin/scutil", "--proxy"])
     return plan
 
@@ -203,14 +257,15 @@ def pilot(run, plan):
         (run / "relay-touched").touch()
         with (run / "relay-console.txt").open("w") as file:
             relay = subprocess.Popen(["/usr/bin/python3", "-I",
-                str(SKILL / "assets/Puma-DNS/session.py"), "--state-dir", str(run / "relay-state")],
+                str(SKILL / "assets/Puma-DNS/session.py"), "--state-dir", str(run / "relay-state"),
+                "--expected-interface", plan.get("device", "en0")],
                 stdin=subprocess.DEVNULL, stdout=file, stderr=subprocess.STDOUT)
         def ready():
             if relay.poll() is not None:
                 raise RuntimeError("Relay exited before readiness; see relay-console.txt")
-            return dns() == "127.0.0.1"
+            return dns(plan.get("service", "Wi-Fi")) == "127.0.0.1"
         wait_for(ready, 45, "Relay readiness timeout")
-        answers = command(["/usr/bin/dig", "@127.0.0.1", SERVER, "A", "+short", "+time=3", "+tries=1"])
+        answers = command(["/usr/bin/dig", "@127.0.0.1", SERVER, "A", "+short", "+time=8", "+tries=1"])
         addresses = []
         for line in answers.splitlines():
             try:
@@ -223,10 +278,19 @@ def pilot(run, plan):
             raise RuntimeError("Relay returned no public Puma IPv4 answer")
         event(run, "relay-ready", addresses=addresses)
         # All artifacts, permissions and recovery are ready. No model calls below.
-        ui(plan, "fl-set", "proxy", "off")
-        ui(plan, "fl-set", "tun", "off")
-        wait_for(lambda: proxies_off() and route() == "en0", 10,
-                 "FlClash route/proxies did not clear to physical Wi-Fi")
+        if plan.get("prior_name"):
+            if not prior_vpn(plan, "verify-name", plan["prior_name"])["on"]:
+                raise RuntimeError("Previous VPN changed before the test")
+            (run / "prior-vpn-touched").touch()
+            prior_vpn(plan, "set", "off")
+            wait_for(lambda: not prior_vpn(plan, "state")["on"], 10,
+                     "Previous VPN did not disconnect")
+            event(run, "previous-vpn-disconnected")
+        else:
+            ui(plan, "fl-set", "proxy", "off")
+            ui(plan, "fl-set", "tun", "off")
+        wait_for(lambda: proxies_off() and route() == plan.get("device", "en0"), 10,
+                 "FlClash route/proxies did not clear to physical uplink")
         event(run, "offline-window-start")
         (run / "vpn-touched").touch()
         vpn(plan, "set", "on")
@@ -254,6 +318,9 @@ def main():
     parser.add_argument("--fl-map", type=Path, help="Optional calibration from a live FlClash screenshot")
     parser.add_argument("--vpn-index", type=int, help="Zero-based switch index verified in the live VPN UI")
     parser.add_argument("--vpn-count", type=int)
+    parser.add_argument("--replace-vpn", nargs=2, metavar=("INDEX", "NAME"),
+                        help="Disconnect this verified active profile, leave it off, then start FlClash with TUN and proxy on")
+    parser.add_argument("--fl-proxy-port", type=int, default=7890)
     parser.add_argument("--log-dir", type=Path, required=True)
     parser.add_argument("--run", action="store_true", help="Actually run; default only checks readiness")
     parser.add_argument("--recover", action="store_true")
@@ -268,14 +335,23 @@ def main():
         return 0 if recover(run, json.loads((run / "plan.json").read_text())) else 1
     if args.ui is None or args.vpn_index is None or not args.vpn_count or args.vpn_index < 0:
         parser.error("--ui, --vpn-index and --vpn-count are required")
+    if args.replace_vpn and (not args.fl_map or not 1 <= args.fl_proxy_port <= 65535):
+        parser.error("--replace-vpn requires a current --fl-map and valid local proxy port")
     # One pilot per user, including its final recovery. Watchdog has its own recovery lock.
     lock = Path("/private/tmp") / f"coreavpn-offline-{os.getuid()}.lock"
     with locked(lock, blocking=False) as lock_file:
         run.mkdir(mode=0o700, parents=True, exist_ok=False)
-        plan = prepare(args)
+        try:
+            plan = prepare(args)
+        except Exception as error:
+            event(run, "preparation-failed", error=str(error), network_changes=False)
+            raise
         save(run / "plan.json", plan)
         (run / "recovery.txt").write_text(
-            "Puma pilot restores the saved FlClash TUN/proxy states and Wi-Fi DNS.\n"
+            ("After disconnecting the previous VPN, leave it off and start FlClash with TUN and system proxy on.\n"
+             if plan.get("prior_name") else
+             "Puma pilot restores the saved FlClash TUN/proxy states.\n") +
+            "Restore DNS on the original physical network service.\n"
             "Do not close or rearrange the VPN and FlClash windows during the run.\n"
             "Manual fallback: disconnect only the verified Puma profile; stop this run's relay\n"
             "by creating relay-state/stop, verify DNS against plan.json, restore saved FlClash switches.\n"
@@ -285,6 +361,8 @@ def main():
         if not args.run:
             print(json.dumps(dict(prepared=True, network_changes=False, run=str(run))))
             return 0
+        if sys.stdin.isatty():
+            subprocess.run(["/usr/bin/sudo", "-v"], check=True)
         # Recheck sudo BEFORE launching a watchdog or changing DNS.
         command(["/usr/bin/sudo", "-n", "-v"])
         def stop(signum, frame):

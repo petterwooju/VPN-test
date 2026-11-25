@@ -30,7 +30,7 @@ func fallbackState() throws -> [String: Bool] {
     if route.range(of: #"interface:\s*utun[0-9]+"#, options: .regularExpression) != nil &&
        route.range(of: #"gateway:\s*198\.18\.0\.1\b"#, options: .regularExpression) != nil {
         tun = true
-    } else if route.range(of: #"interface:\s*en0\b"#, options: .regularExpression) != nil {
+    } else if route.range(of: #"interface:\s*en[0-9]+\b"#, options: .regularExpression) != nil {
         tun = false
     } else { try fail("Cannot infer FlClash TUN state from the verified route") }
     let proxy = try shell("/usr/sbin/scutil", ["--proxy"])
@@ -43,7 +43,7 @@ func fallbackState() throws -> [String: Bool] {
     }
     return ["tun": tun, "proxy": flags[0]]
 }
-func fallbackClick(_ root: AXUIElement, _ key: String) throws {
+func calibratedPosition(_ root: AXUIElement, _ key: String) throws -> CGPoint {
     guard let map = flMap, let width = map["width"] as? Double, let height = map["height"] as? Double,
           let point = map[key] as? [Double], point.count == 2 else { try fail("Missing live FlClash screen calibration") }
     let frame = try geometry(root)
@@ -51,10 +51,17 @@ func fallbackClick(_ root: AXUIElement, _ key: String) throws {
           point[0] > 0, point[1] > 0, point[0] < width, point[1] < height else {
         try fail("FlClash window size changed; recalibrate online")
     }
+    return CGPoint(x: frame["x"]! + point[0], y: frame["y"]! + point[1])
+}
+func fallbackClick(_ root: AXUIElement, _ key: String) throws {
+    let position = try calibratedPosition(root, key)
+    for _ in 0..<10 {
+        if NSWorkspace.shared.frontmostApplication?.bundleIdentifier == "com.follow.clash" { break }
+        Thread.sleep(forTimeInterval: 0.1)
+    }
     guard NSWorkspace.shared.frontmostApplication?.bundleIdentifier == "com.follow.clash" else {
         try fail("FlClash did not become frontmost; no click sent")
     }
-    let position = CGPoint(x: frame["x"]! + point[0], y: frame["y"]! + point[1])
     for type in [CGEventType.mouseMoved, .leftMouseDown, .leftMouseUp] {
         guard let event = CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: position, mouseButton: .left) else {
             try fail("Could not create local mouse event")
@@ -159,10 +166,20 @@ func flSet(_ key: String, _ desired: Bool) throws {
     }
     try fail("FlClash switch did not reach requested state")
 }
+func vpnDetailsSheet(_ root: AXUIElement) -> AXUIElement? {
+    if let sheet = nodes(root).first(where: { str($0, kAXRoleAttribute) == "AXSheet" }) {
+        return sheet
+    }
+    guard let app = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.systempreferences").first else {
+        return nil
+    }
+    let ax = AXUIElementCreateApplication(app.processIdentifier)
+    return appWindows(ax).first(where: { str($0, kAXRoleAttribute) == "AXSheet" })
+}
 func vpnSwitch(_ index: Int, _ count: Int) throws -> AXUIElement {
     let root = try window("com.apple.systempreferences")
     guard ["VPN"].contains(str(root, kAXTitleAttribute)) else { try fail("System Settings must remain on VPN") }
-    guard !nodes(root).contains(where: { str($0, kAXRoleAttribute) == "AXSheet" }) else {
+    guard vpnDetailsSheet(root) == nil else {
         try fail("Close the VPN details sheet before running")
     }
     let items = switches(root)
@@ -171,19 +188,19 @@ func vpnSwitch(_ index: Int, _ count: Int) throws -> AXUIElement {
 }
 func closeVPNDetails() throws {
     let root = try window("com.apple.systempreferences")
-    guard let sheet = nodes(root).first(where: { str($0, kAXRoleAttribute) == "AXSheet" }) else { return }
+    guard let sheet = vpnDetailsSheet(root) else { return }
     guard let cancel = nodes(sheet).first(where: {
         [str($0, kAXTitleAttribute), str($0, kAXDescriptionAttribute)].contains(where: { ["취소", "Cancel"].contains($0) })
     }) else { try fail("VPN details Cancel button unavailable") }
     try press(cancel)
     for _ in 0..<20 {
-        if !nodes(try window("com.apple.systempreferences")).contains(where: { str($0, kAXRoleAttribute) == "AXSheet" }) { return }
+        if try vpnDetailsSheet(window("com.apple.systempreferences")) == nil { return }
         Thread.sleep(forTimeInterval: 0.1)
     }
     try fail("VPN details did not close")
 }
 // Verify the selected profile's two hostname fields without printing any field values.
-func verifyVPN(_ index: Int, _ count: Int, _ server: String) throws {
+func verifyVPN(_ index: Int, _ count: Int, _ expected: String, byName: Bool = false) throws {
     _ = try vpnSwitch(index, count)
     let root = try window("com.apple.systempreferences")
     let details = nodes(root).filter {
@@ -195,11 +212,11 @@ func verifyVPN(_ index: Int, _ count: Int, _ server: String) throws {
     defer { try? closeVPNDetails() }
     for _ in 0..<20 {
         let w = try window("com.apple.systempreferences")
-        if let sheet = nodes(w).first(where: { str($0, kAXRoleAttribute) == "AXSheet" }) {
+        if let sheet = vpnDetailsSheet(w) {
             // Only compare non-secure text fields to the supplied public hostname.
             let fields = nodes(sheet).filter { str($0, kAXRoleAttribute) == "AXTextField" }
-            let matching = fields.filter { str($0, kAXValueAttribute) == server }
-            guard matching.count == 2 else { try fail("Server and remote ID do not both match the expected hostname") }
+            let matching = fields.filter { str($0, kAXValueAttribute) == expected }
+            guard matching.count == (byName ? 1 : 2) else { try fail("VPN details do not match the expected profile") }
             try closeVPNDetails()
             return
         }
@@ -237,15 +254,20 @@ do {
                     "titles": windows.map { str($0, kAXTitleAttribute) },
                     "roles": windows.map { str($0, kAXRoleAttribute) }]
         })
+    case "fl-engine-check", "fl-engine-start":
+        let root = try window("com.follow.clash")
+        _ = try calibratedPosition(root, "engine")
+        if action == "fl-engine-start" { try fallbackClick(root, "engine") }
+        try output(["ok": true])
     case "fl-state": try output(flState())
     case "fl-set":
         guard args.count == 3, ["tun", "proxy"].contains(args[1]), ["on", "off"].contains(args[2]) else { try fail("Invalid fl-set arguments") }
         try flSet(args[1], args[2] == "on"); try output(flState())
-    case "vpn-verify", "vpn-state", "vpn-set":
+    case "vpn-verify", "vpn-verify-name", "vpn-state", "vpn-set":
         guard args.count >= 3, let index = Int(args[1]), let count = Int(args[2]) else { try fail("Expected zero-based VPN index and switch count") }
-        if action == "vpn-verify" {
+        if action == "vpn-verify" || action == "vpn-verify-name" {
             guard args.count == 4 else { try fail("Expected server hostname") }
-            try verifyVPN(index, count, args[3])
+            try verifyVPN(index, count, args[3], byName: action == "vpn-verify-name")
         }
         if action == "vpn-set" {
             guard args.count == 4, ["on", "off"].contains(args[3]) else { try fail("Expected on/off") }

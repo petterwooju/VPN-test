@@ -36,7 +36,8 @@ from pathlib import Path
 state, worker = map(Path, sys.argv[1:3])
 uid, gid = map(int, sys.argv[3:5])
 service, original, local = sys.argv[5:8]
-lan = sys.argv[8:]
+device, upstream, restore = sys.argv[8:11]
+lan = sys.argv[11:]
 networksetup = "/usr/sbin/networksetup"
 
 def get_dns():
@@ -92,7 +93,7 @@ with ExitStack() as resources:
         worker_args.extend((str(lan_sockets[0].fileno()), str(lan_sockets[1].fileno()), allowed_clients))
     worker_process = subprocess.Popen(
         ["/usr/bin/python3", "-I", str(worker), str(state), str(state / "relay.log"),
-         *worker_args],
+         "--interface", device, "--upstream", upstream, *worker_args],
         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
         pass_fds=tuple(listener.fileno() for listener in sockets), preexec_fn=enter_user_context,
         start_new_session=True,
@@ -123,8 +124,8 @@ with ExitStack() as resources:
             for _ in range(4):
                 try:
                     if get_dns() == local:
-                        set_dns(original)
-                    if get_dns() != local:
+                        set_dns(restore)
+                    if get_dns() == original:
                         restored = True
                         print("Final Wi-Fi DNS " + get_dns().replace("\n", " "), flush=True)
                         break
@@ -243,8 +244,11 @@ def run_session(iphone=None, allow_lan=False, state_dir=None):
     if os.getuid() == 0:
         raise RuntimeError("일반 사용자로 실행하고, 실행 중 표시되는 sudo 요청만 승인하세요.")
     lan = wifi_lan_configuration(iphone) if allow_lan or iphone is not None else ()
-    if current_dns() != ORIGINAL_DNS:
-        raise RuntimeError(f"이 Mac용 중계기의 기준 Wi-Fi DNS는 {ORIGINAL_DNS}입니다.")
+    global ORIGINAL_DNS
+    ORIGINAL_DNS = current_dns()
+    import runpy
+    upstream_dns, restore_dns = runpy.run_path(str(Path(__file__).with_name("uplink.py")))["resolver_settings"](
+        WIFI, WIFI_INTERFACE, ORIGINAL_DNS)
 
     relay_file = Path(__file__).resolve().with_name("relay.py")
     if state_dir is None:
@@ -263,7 +267,7 @@ def run_session(iphone=None, allow_lan=False, state_dir=None):
         [
             "/usr/bin/sudo", "-n", PYTHON, "-I", "-S", "-c", CONTROLLER,
             str(state), str(relay_file), str(os.getuid()), str(os.getgid()),
-            WIFI, ORIGINAL_DNS, RELAY_ADDRESS, *lan,
+            WIFI, ORIGINAL_DNS, RELAY_ADDRESS, WIFI_INTERFACE, upstream_dns, restore_dns, *lan,
         ],
         stdin=subprocess.DEVNULL,
     )
@@ -277,7 +281,8 @@ def run_session(iphone=None, allow_lan=False, state_dir=None):
             time.sleep(0.2)
         puma_answers = validate_relay(heartbeat)
         heartbeat.touch()
-        show_domain_addresses(relay_file, heartbeat, puma_answers)
+        if state_dir is None:
+            show_domain_addresses(relay_file, heartbeat, puma_answers)
         heartbeat.touch()
         (state / "validated").touch()
         deadline = time.monotonic() + 15
@@ -309,7 +314,7 @@ def run_session(iphone=None, allow_lan=False, state_dir=None):
     if current_dns() != ORIGINAL_DNS:
         raise RuntimeError(
             "Wi-Fi DNS 원복을 확인하지 못했습니다. "
-            "sudo /usr/sbin/networksetup -setdnsservers Wi-Fi 223.5.5.5"
+            "Check the original DNS of the selected service."
         )
     if not interrupted:
         raise RuntimeError("중계기가 종료됐습니다. Wi-Fi DNS는 원래 값입니다.")
@@ -326,8 +331,14 @@ if __name__ == "__main__":
         "--iphone", nargs="?", const="", metavar="IPv4",
         help="같은 Wi-Fi의 아이폰에서 DNS 사용을 허용 (값을 생략하면 직접 입력)",
     )
+    parser.add_argument("--expected-interface")
     args = parser.parse_args()
     try:
+        import runpy
+        if args.iphone is None and not args.lan:
+            WIFI_INTERFACE, WIFI = runpy.run_path(str(Path(__file__).with_name("uplink.py")))["active_link"]()
+        if args.expected_interface and args.expected_interface != WIFI_INTERFACE:
+            raise RuntimeError("Physical interface changed during preparation")
         with (Path(tempfile.gettempdir()) / "puma-dns-session.lock").open("a") as lock:
             try:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)

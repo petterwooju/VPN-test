@@ -29,7 +29,17 @@ if sys.argv[1:] == ['--list-domains']:
 state = Path(sys.argv[1])
 logfile = Path(sys.argv[2])
 lock = threading.Lock()
-wifi = socket.if_nametoindex('en0')
+if sys.argv[3:4] == ["--interface"]:
+    device = sys.argv[4]
+    del sys.argv[3:5]
+else:
+    import runpy
+    device, _ = runpy.run_path(str(Path(__file__).with_name("uplink.py")))["active_link"]()
+upstream_dns = "223.5.5.5"
+if sys.argv[3:4] == ["--upstream"]:
+    upstream_dns = str(ipaddress.IPv4Address(sys.argv[4]))
+    del sys.argv[3:5]
+wifi = socket.if_nametoindex(device)
 
 def note(message):
     with lock, logfile.open('a') as log:
@@ -48,10 +58,10 @@ def question(data):
         i += n+1
     return labels, int.from_bytes(data[i+1:i+3], 'big')
 
-def upstream_socket(t, ip, port):
+def upstream_socket(t, ip, port, timeout=5):
     s = socket.socket(socket.AF_INET, t)
     try:
-        s.settimeout(5)
+        s.settimeout(timeout)
         s.setsockopt(socket.IPPROTO_IP, 25, wifi)
         s.connect((ip, port))
         return s
@@ -61,7 +71,7 @@ def upstream_socket(t, ip, port):
 
 class WifiHTTPS(http.client.HTTPSConnection):
     def connect(self):
-        raw = upstream_socket(socket.SOCK_STREAM, '101.198.192.33', 443)
+        raw = upstream_socket(socket.SOCK_STREAM, self.upstream_ip, 443, timeout=3)
         self.sock = self._context.wrap_socket(raw, server_hostname=self.host)
 
 def readn(s, n):
@@ -73,25 +83,35 @@ def readn(s, n):
         out.extend(part)
     return bytes(out)
 
-def answer(data, tcp, client_address):
-    labels, kind = question(data)
-    if tuple(labels) in DOH_DOMAINS:
+def doh_reply(data):
+    for attempt, ip in enumerate(("101.198.193.29", "101.198.192.33")):
         conn = WifiHTTPS('doh.360.cn', timeout=5, context=ssl.create_default_context())
+        conn.upstream_ip = ip
         try:
             conn.request('POST','/dns-query',data,{'Content-Type':'application/dns-message','Accept':'application/dns-message'})
             res = conn.getresponse()
             if res.status != 200:
                 raise OSError('DoH HTTP '+str(res.status))
-            reply = res.read(65536)
+            return res.read(65536)
+        except (ssl.SSLEOFError, http.client.RemoteDisconnected, ConnectionResetError, socket.timeout) as error:
+            note(f"DoH attempt {attempt+1} on {device}: {type(error).__name__}")
+            if attempt == 1:
+                raise
         finally:
             conn.close()
+
+
+def answer(data, tcp, client_address):
+    labels, kind = question(data)
+    if tuple(labels) in DOH_DOMAINS:
+        reply = doh_reply(data)
         if len(reply)<12 or len(reply)>65535 or not reply[2]&128 or question_response_name(reply) != (labels,kind):
             raise ValueError('unexpected DoH response')
         domain = b'.'.join(labels).decode('ascii')
         note(f'{domain} type={kind} via 360 HTTPS, answers={int.from_bytes(reply[6:8], "big")}, '
              f'rcode={reply[3] & 15}, client={client_address}')
         return data[:2]+reply[2:]
-    with upstream_socket(socket.SOCK_STREAM if tcp else socket.SOCK_DGRAM,'223.5.5.5',53) as upstream:
+    with upstream_socket(socket.SOCK_STREAM if tcp else socket.SOCK_DGRAM,upstream_dns,53) as upstream:
         if tcp:
             upstream.sendall(struct.pack('!H',len(data))+data)
             reply=readn(upstream,int.from_bytes(readn(upstream,2),'big'))
