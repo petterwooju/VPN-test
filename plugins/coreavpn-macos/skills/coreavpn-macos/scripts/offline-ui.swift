@@ -55,7 +55,13 @@ func calibratedPosition(_ root: AXUIElement, _ key: String) throws -> CGPoint {
 }
 func fallbackClick(_ root: AXUIElement, _ key: String) throws {
     let position = try calibratedPosition(root, key)
-    for _ in 0..<10 {
+    var pid: pid_t = 0
+    if AXUIElementGetPid(root, &pid) == .success {
+        let app = AXUIElementCreateApplication(pid)
+        AXUIElementSetAttributeValue(app, kAXFrontmostAttribute as CFString, kCFBooleanTrue)
+        AXUIElementPerformAction(root, kAXRaiseAction as CFString)
+    }
+    for _ in 0..<25 {
         if NSWorkspace.shared.frontmostApplication?.bundleIdentifier == "com.follow.clash" { break }
         Thread.sleep(forTimeInterval: 0.1)
     }
@@ -166,6 +172,16 @@ func flSet(_ key: String, _ desired: Bool) throws {
     }
     try fail("FlClash switch did not reach requested state")
 }
+func flEngineButton(_ root: AXUIElement, starting: Bool) -> AXUIElement? {
+    let labels = starting ? ["시작", "Start"] : ["중지", "Stop"]
+    let matches = nodes(root).filter { element in
+        str(element, kAXRoleAttribute) == "AXButton" &&
+        [kAXTitleAttribute, kAXDescriptionAttribute, kAXHelpAttribute].contains {
+            labels.contains(str(element, $0))
+        }
+    }
+    return matches.count == 1 ? matches[0] : nil
+}
 func vpnDetailsSheet(_ root: AXUIElement) -> AXUIElement? {
     if let sheet = nodes(root).first(where: { str($0, kAXRoleAttribute) == "AXSheet" }) {
         return sheet
@@ -254,11 +270,18 @@ do {
                     "titles": windows.map { str($0, kAXTitleAttribute) },
                     "roles": windows.map { str($0, kAXRoleAttribute) }]
         })
-    case "fl-engine-check", "fl-engine-start":
+    case "fl-engine-check", "fl-engine-start", "fl-engine-stop":
         let root = try window("com.follow.clash")
         _ = try calibratedPosition(root, "engine")
-        if action == "fl-engine-start" { try fallbackClick(root, "engine") }
-        try output(["ok": true])
+        let button = flEngineButton(root, starting: action == "fl-engine-start")
+        if action != "fl-engine-check" {
+            if let button {
+                try press(button)
+            } else {
+                try fallbackClick(root, "engine")
+            }
+        }
+        try output(["ok": true, "named_stop_button": button != nil])
     case "fl-state": try output(flState())
     case "fl-set":
         guard args.count == 3, ["tun", "proxy"].contains(args[1]), ["on", "off"].contains(args[2]) else { try fail("Invalid fl-set arguments") }

@@ -50,7 +50,7 @@ def ui(plan, *args):
     r = subprocess.run([plan["ui"], *calibration, *args], capture_output=True,
                        text=True, stdin=subprocess.DEVNULL, timeout=18)
     if r.returncode:
-        raise RuntimeError(f"offline-ui {args[0]} failed: {r.stderr.strip()[:400]}")
+        raise RuntimeError(f"offline-ui {' '.join(args[:3] if args[0] == 'fl-set' else args[:1])} failed: {r.stderr.strip()[:400]}")
     return json.loads(r.stdout)
 
 
@@ -155,25 +155,31 @@ def recover(run, plan):
                 (state / "stop").touch()
                 restored = run / "dns-restored"
                 if not restored.exists():
-                    wait_for(lambda: dns(plan.get("service", "Wi-Fi")) == plan["dns"], 18,
+                    saved = run / "relay-baseline.json"
+                    baseline = json.loads(saved.read_text()) if saved.exists() else plan["dns"]
+                    wait_for(lambda: dns(plan.get("service", "Wi-Fi")) == baseline, 18,
                              "DNS restoration could not be verified")
                     restored.touch()
 
         attempt("disconnect-test-vpn", disconnect)
         attempt("restore-dns", stop_relay)
-        if plan.get("prior_name") and (run / "prior-vpn-touched").exists():
+        replaced_vpn = plan.get("prior_name") and (run / "prior-vpn-touched").exists()
+        if replaced_vpn or (run / "engine-stop-sent").exists():
             attempt("start-flclash-engine", lambda: restore_engine(run, plan))
         # Do not skip connectivity recovery when disconnect/DNS checks fail.
-        for key in (("tun", "proxy") if not plan.get("prior_name") or (run / "prior-vpn-touched").exists() else ()):
-            attempt("restore-flclash-" + key,
-                    lambda key=key: ui(plan, "fl-set", key, "on" if plan["flclash"][key] else "off"))
-        if not plan.get("prior_name") or (run / "prior-vpn-touched").exists():
+        if not plan.get("prior_name") or replaced_vpn:
+            for key in ("tun", "proxy"):
+                attempt("restore-flclash-" + key,
+                        lambda key=key: ui(plan, "fl-set", key, "on" if plan["flclash"][key] else "off"))
             attempt("verify-flclash", lambda: verify_fl(plan))
-        if plan.get("prior_name") and (run / "prior-vpn-touched").exists():
+        if replaced_vpn:
             def verify_prior_off():
                 if prior_vpn(plan, "verify-name", plan["prior_name"])["on"]:
                     raise RuntimeError("Previous VPN is still connected")
             attempt("verify-previous-vpn-off", verify_prior_off)
+        if plan.get("verify_off_vpn"):
+            attempt("verify-excluded-vpn-off", lambda: verify_excluded_vpn(plan))
+        if replaced_vpn or plan.get("cycle_fl_engine"):
             attempt("verify-flclash-internet", lambda: verify_proxy_internet(plan))
         attempt("verify-final-dns", lambda: verify_dns(run, plan))
         attempt("record-final-route", lambda: event(run, "final-route", interface=route()))
@@ -221,6 +227,12 @@ def watchdog(run, owner, deadline):
     recover(run, plan)
 
 
+def verify_excluded_vpn(plan):
+    index, name = plan["verify_off_vpn"]
+    if ui(plan, "vpn-verify-name", index, str(plan["vpn_count"]), name)["on"]:
+        raise RuntimeError(f"{name} must remain disconnected")
+
+
 def prepare(args):
     plan = dict(ui=str(args.ui.resolve()), vpn_index=args.vpn_index, vpn_count=args.vpn_count)
     if args.fl_map:
@@ -243,6 +255,15 @@ def prepare(args):
         raise RuntimeError(f"이미 IKEv2 VPN({plan['route']})이 연결되어 있습니다. 시스템 설정 → VPN에서 현재 프로필을 확인하세요.")
     if not args.replace_vpn:
         plan["flclash"] = ui(plan, "fl-state")
+    if args.cycle_fl_engine:
+        plan.update(cycle_fl_engine=True, proxy_port=args.fl_proxy_port)
+        ui(plan, "fl-engine-check")
+        if plan["flclash"] != {"tun": True, "proxy": True} or not fl_proxy_listening(plan):
+            raise RuntimeError("Start with the FlClash engine, TUN and system proxy all enabled")
+        verify_proxy_internet(plan)
+    if args.require_vpn_off:
+        plan["verify_off_vpn"] = args.require_vpn_off
+        verify_excluded_vpn(plan)
     if vpn(plan, "verify", SERVER)["on"]:
         raise RuntimeError("Puma must be disconnected before the pilot")
     import runpy
@@ -262,6 +283,17 @@ def pilot(run, plan):
     try:
         # Never ask for an admin password after connectivity is removed.
         command(["/usr/bin/sudo", "-n", "-v"])
+        if plan.get("cycle_fl_engine"):
+            if not fl_proxy_listening(plan):
+                raise RuntimeError("FlClash engine stopped unexpectedly before the test")
+            (run / "engine-stop-sent").touch()
+            event(run, "stopping-flclash-engine")
+            ui(plan, "fl-engine-stop")
+            wait_for(lambda: not fl_proxy_listening(plan), 8, "FlClash engine did not stop")
+            event(run, "flclash-engine-stopped")
+            wait_for(lambda: proxies_off() and route() == plan["device"], 10,
+                     "FlClash route/proxies did not clear to physical uplink")
+            save(run / "relay-baseline.json", dns(plan["service"]))
         (run / "relay-touched").touch()
         with (run / "relay-console.txt").open("w") as file:
             relay = subprocess.Popen(["/usr/bin/python3", "-I",
@@ -294,11 +326,13 @@ def pilot(run, plan):
             wait_for(lambda: not prior_vpn(plan, "state")["on"], 10,
                      "Previous VPN did not disconnect")
             event(run, "previous-vpn-disconnected")
-        else:
+        elif not plan.get("cycle_fl_engine"):
             ui(plan, "fl-set", "proxy", "off")
             ui(plan, "fl-set", "tun", "off")
         wait_for(lambda: proxies_off() and route() == plan.get("device", "en0"), 10,
                  "FlClash route/proxies did not clear to physical uplink")
+        if plan.get("cycle_fl_engine") and dns(plan.get("service", "Wi-Fi")) != "127.0.0.1":
+            raise RuntimeError("Temporary DNS changed before connecting Puma")
         event(run, "offline-window-start")
         (run / "vpn-touched").touch()
         vpn(plan, "set", "on")
@@ -309,6 +343,9 @@ def pilot(run, plan):
         output = command([sys.executable, SCRIPTS / "vpn-ping.py", "--server", SERVER,
                           "--tunnel", tunnel, "--log-dir", run], timeout=28)
         event(run, "ping-complete", result=json.loads(output))
+    except (Exception, KeyboardInterrupt) as error:
+        event(run, "measurement-interrupted", error=str(error))
+        raise
     finally:
         recovered = recover(run, plan)
         if relay:
@@ -328,6 +365,10 @@ def main():
     parser.add_argument("--vpn-count", type=int)
     parser.add_argument("--replace-vpn", nargs=2, metavar=("INDEX", "NAME"),
                         help="Disconnect this verified active profile, leave it off, then start FlClash with TUN and proxy on")
+    parser.add_argument("--cycle-fl-engine", action="store_true",
+                        help="Stop and restart the originally active FlClash engine")
+    parser.add_argument("--require-vpn-off", nargs=2, metavar=("INDEX", "NAME"),
+                        help="Verify that the named profile stays disconnected")
     parser.add_argument("--fl-proxy-port", type=int, default=7890)
     parser.add_argument("--log-dir", type=Path, required=True)
     parser.add_argument("--run", action="store_true", help="Actually run; default only checks readiness")
@@ -343,8 +384,10 @@ def main():
         return 0 if recover(run, json.loads((run / "plan.json").read_text())) else 1
     if args.ui is None or args.vpn_index is None or not args.vpn_count or args.vpn_index < 0:
         parser.error("--ui, --vpn-index and --vpn-count are required")
-    if args.replace_vpn and (not args.fl_map or not 1 <= args.fl_proxy_port <= 65535):
-        parser.error("--replace-vpn requires a current --fl-map and valid local proxy port")
+    if args.replace_vpn and args.cycle_fl_engine:
+        parser.error("--replace-vpn and --cycle-fl-engine are mutually exclusive")
+    if (args.replace_vpn or args.cycle_fl_engine) and (not args.fl_map or not 1 <= args.fl_proxy_port <= 65535):
+        parser.error("Engine recovery requires a current --fl-map and valid local proxy port")
     # One pilot per user, including its final recovery. Watchdog has its own recovery lock.
     lock = Path("/private/tmp") / f"coreavpn-offline-{os.getuid()}.lock"
     with locked(lock, blocking=False) as lock_file:
@@ -358,6 +401,8 @@ def main():
         (run / "recovery.txt").write_text(
             ("After disconnecting the previous VPN, leave it off and start FlClash with TUN and system proxy on.\n"
              if plan.get("prior_name") else
+             "Puma pilot restores the FlClash engine and saved TUN/proxy states.\n"
+             if plan.get("cycle_fl_engine") else
              "Puma pilot restores the saved FlClash TUN/proxy states.\n") +
             "Restore DNS on the original physical network service.\n"
             "Do not close or rearrange the VPN and FlClash windows during the run.\n"

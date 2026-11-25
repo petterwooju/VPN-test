@@ -118,28 +118,36 @@ with ExitStack() as resources:
     finally:
         for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
             signal.signal(signum, signal.SIG_IGN)
-        # Keep a functioning relay available until restoration has been verified.
+        restored = not changed
         if changed:
-            restored = False
             for _ in range(4):
                 try:
-                    if get_dns() == local:
+                    current = get_dns()
+                    if current == local:
                         set_dns(restore)
-                    if get_dns() == original:
+                        current = get_dns()
+                    if current == original:
                         restored = True
-                        print("Final Wi-Fi DNS " + get_dns().replace("\n", " "), flush=True)
+                        print("Final service DNS " + current.replace("\n", " "), flush=True)
                         break
                 except (OSError, subprocess.SubprocessError):
-                    time.sleep(1)
+                    pass
+                time.sleep(0.5)
             if not restored:
-                print("Wi-Fi DNS restoration could not be verified", file=sys.stderr, flush=True)
-                sys.exit(2)
+                print("DNS restoration could not be verified", file=sys.stderr, flush=True)
+                # Preserve DNS service only while the configured resolvers may
+                # still include this worker. Another app may have taken over.
+                current = get_dns()
+                if not current or local in current.splitlines():
+                    sys.exit(2)
         worker_process.terminate()
         try:
             worker_process.wait(timeout=5)
         except subprocess.TimeoutExpired:
             worker_process.kill()
             worker_process.wait()
+        if not restored:
+            sys.exit(2)
 """
 
 

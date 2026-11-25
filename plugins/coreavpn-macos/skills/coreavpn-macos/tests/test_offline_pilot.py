@@ -91,6 +91,47 @@ class RecoveryTests(unittest.TestCase):
             self.assertTrue(pilot.recover(self.run, self.plan))
         self.assertTrue((self.run / "dns-restored").exists())
 
+    def test_engine_restarted_before_tun_and_proxy(self):
+        self.plan["cycle_fl_engine"] = True
+        (self.run / "engine-stop-sent").touch()
+        def start(*args):
+            self.calls.append(("start-engine",))
+
+        with patch.object(pilot, "restore_engine", side_effect=start), \
+             patch.object(pilot, "verify_proxy_internet") as verify_internet:
+            self.assertTrue(self.recovered())
+
+        self.assertEqual(self.calls[:3], [
+            ("start-engine",), ("fl-set", "tun", "on"), ("fl-set", "proxy", "off")
+        ])
+        verify_internet.assert_called_once_with(self.plan)
+
+    def test_engine_cycle_stops_engine_without_toggling_settings(self):
+        self.plan.update(cycle_fl_engine=True, device="en6", service="Ethernet", proxy_port=7890)
+        relay = Mock()
+        relay.poll.return_value = None
+        commands = Mock(side_effect=lambda args, **kwargs: {
+            "/usr/bin/dig": "1.2.3.4",
+            pilot.sys.executable: "{}",
+        }.get(args[0], ""))
+
+        def set_ui(plan, action):
+            self.calls.append((action,))
+
+        with patch.object(pilot, "command", commands), \
+             patch.object(pilot.subprocess, "Popen", return_value=relay), \
+             patch.object(pilot, "dns", return_value="127.0.0.1"), \
+             patch.object(pilot, "fl_proxy_listening", side_effect=[True, False]), \
+             patch.object(pilot, "proxies_off", return_value=True), \
+             patch.object(pilot, "route", side_effect=["en6", "en6", "ipsec0", "ipsec0"]), \
+             patch.object(pilot, "ui", side_effect=set_ui), \
+             patch.object(pilot, "vpn", side_effect=self.vpn), \
+             patch.object(pilot, "recover", return_value=True):
+            pilot.pilot(self.run, self.plan)
+
+        self.assertEqual(self.calls[:2], [("fl-engine-stop",), ("vpn-set", "on")])
+        self.assertTrue((self.run / "engine-stop-sent").exists())
+
     def test_pilot_cleans_up_after_flclash_toggle_fails(self):
         # Relay readiness succeeds, first proxy mutation fails.
         fake_relay = Mock()
