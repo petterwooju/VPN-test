@@ -1,0 +1,574 @@
+// !$*UTF8*$!
+{
+	classes = {
+	};
+	objectVersion = 77;
+	archiveVersion = 1;
+	objects = {
+        0000000000000000000000D3 = { isa = PBXFileReference; path = AppleApp/Rules/RoutingGeoDatabase.swift; lastKnownFileType = sourcecode.swift; sourceTree = SOURCE_ROOT; };
+        0000000000000000000000D4 = { isa = PBXBuildFile; fileRef = 0000000000000000000000D3; };
+        0000000000000000000000CD = { isa = XCBuildConfiguration; name = Release; buildSettings = {
+            PRODUCT_NAME = "$(PRODUCT_BUNDLE_IDENTIFIER)"; PRODUCT_MODULE_NAME = CoreaRouting;
+            PRODUCT_BUNDLE_IDENTIFIER = net.petterwooju.coreavpn.client.routing;
+            SDKROOT = macosx; SUPPORTED_PLATFORMS = macosx; MACOSX_DEPLOYMENT_TARGET = 14.0;
+            SKIP_INSTALL = YES; ENABLE_HARDENED_RUNTIME = YES; APPLICATION_EXTENSION_API_ONLY = YES;
+            INFOPLIST_FILE = AppleApp/Signing/Routing-Info.plist;
+            CODE_SIGN_STYLE = Automatic; CODE_SIGN_ENTITLEMENTS = AppleApp/Signing/Routing.entitlements;
+            SWIFT_INCLUDE_PATHS = "$(SRCROOT)/AppleApp/TransportPrototype/include";
+            COREAVPN_ROUTING_ARTIFACTS = "$(SRCROOT)/.build/routing/macosx";
+            LIBRARY_SEARCH_PATHS = "\"$(COREAVPN_ROUTING_ARTIFACTS)\"";
+            OTHER_LDFLAGS = ("$(inherited)", "-lCoreIPSec", "-lresolv", "-framework", Security, "-framework", CoreFoundation);
+            MARKETING_VERSION = 0.1.0; CURRENT_PROJECT_VERSION = 1;
+        }; };
+        0000000000000000000000CC = { isa = XCBuildConfiguration; name = Debug; buildSettings = {
+            PRODUCT_NAME = "$(PRODUCT_BUNDLE_IDENTIFIER)"; PRODUCT_MODULE_NAME = CoreaRouting;
+            PRODUCT_BUNDLE_IDENTIFIER = net.petterwooju.coreavpn.client.routing;
+            SDKROOT = macosx; SUPPORTED_PLATFORMS = macosx; MACOSX_DEPLOYMENT_TARGET = 14.0;
+            SKIP_INSTALL = YES; ENABLE_HARDENED_RUNTIME = YES; APPLICATION_EXTENSION_API_ONLY = YES;
+            INFOPLIST_FILE = AppleApp/Signing/Routing-Info.plist;
+            CODE_SIGN_STYLE = Automatic; CODE_SIGN_ENTITLEMENTS = AppleApp/Signing/Routing.entitlements;
+            SWIFT_INCLUDE_PATHS = "$(SRCROOT)/AppleApp/TransportPrototype/include";
+            COREAVPN_ROUTING_ARTIFACTS = "$(SRCROOT)/.build/routing/macosx";
+            LIBRARY_SEARCH_PATHS = "\"$(COREAVPN_ROUTING_ARTIFACTS)\"";
+            OTHER_LDFLAGS = ("$(inherited)", "-lCoreIPSec", "-lresolv", "-framework", Security, "-framework", CoreFoundation);
+            MARKETING_VERSION = 0.1.0; CURRENT_PROJECT_VERSION = 1;
+        }; };
+        0000000000000000000000D2 = { isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (0000000000000000000000D1); runOnlyForDeploymentPostprocessing = 0; };
+        0000000000000000000000D1 = { isa = PBXBuildFile; fileRef = 0000000000000000000000AC; };
+        0000000000000000000000CF = { isa = PBXNativeTarget; name = CoreaRouting; productName = CoreaRouting; productType = "com.apple.product-type.system-extension"; buildConfigurationList = 0000000000000000000000CE; buildPhases = (0000000000000000000000C8, 0000000000000000000000D2); dependencies = (); buildRules = (); fileSystemSynchronizedGroups = (0000000000000000000000C0); productReference = 0000000000000000000000C4; };
+        0000000000000000000000CE = { isa = XCConfigurationList; defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; buildConfigurations = (0000000000000000000000CC, 0000000000000000000000CD); };
+        0000000000000000000000CB = { isa = PBXTargetDependency; target = 0000000000000000000000CF; targetProxy = 0000000000000000000000CA; platformFilters = (macos,); };
+        0000000000000000000000CA = { isa = PBXContainerItemProxy; containerPortal = 000000000000000000000001; proxyType = 1; remoteGlobalIDString = 0000000000000000000000CF; remoteInfo = CoreaRouting; };
+        0000000000000000000000C9 = { isa = PBXCopyFilesBuildPhase; name = "Embed System Extensions"; buildActionMask = 2147483647; dstPath = "$(CONTENTS_FOLDER_PATH)/Library/SystemExtensions"; dstSubfolderSpec = 16; files = (0000000000000000000000C7); runOnlyForDeploymentPostprocessing = 0; };
+        0000000000000000000000C8 = { isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (0000000000000000000000C5, 0000000000000000000000D4); runOnlyForDeploymentPostprocessing = 0; };
+        0000000000000000000000C7 = { isa = PBXBuildFile; fileRef = 0000000000000000000000C4; platformFilters = (macos,); settings = { ATTRIBUTES = (RemoveHeadersOnCopy); }; };
+        0000000000000000000000C6 = { isa = PBXBuildFile; fileRef = 0000000000000000000000C3; platformFilters = (macos,); };
+        0000000000000000000000C5 = { isa = PBXBuildFile; fileRef = 0000000000000000000000C2; };
+        0000000000000000000000C4 = { isa = PBXFileReference; path = net.petterwooju.coreavpn.client.routing.systemextension; explicitFileType = wrapper.system-extension; sourceTree = BUILT_PRODUCTS_DIR; };
+        0000000000000000000000C3 = { isa = PBXFileReference; path = AppleApp/ProxyPrototype/Swift/ExperimentalProxyStore.swift; lastKnownFileType = sourcecode.swift; sourceTree = SOURCE_ROOT; };
+        0000000000000000000000C2 = { isa = PBXFileReference; path = AppleApp/Rules/RoutingRules.swift; lastKnownFileType = sourcecode.swift; sourceTree = SOURCE_ROOT; };
+        0000000000000000000000C1 = { isa = PBXFileSystemSynchronizedRootGroup; path = AppleApp/TransparentRouting/Host; sourceTree = "<group>"; };
+        0000000000000000000000C0 = { isa = PBXFileSystemSynchronizedRootGroup; path = AppleApp/TransparentRouting/Provider; sourceTree = "<group>"; };
+        0000000000000000000000B1 = { isa = PBXFileSystemSynchronizedRootGroup; path = AppleApp/ProxyPrototype/Swift; sourceTree = "<group>"; };
+        0000000000000000000000B2 = { isa = PBXFileReference; path = AppleApp/RoutingPrototype/Extension/GroupPacketTransport.swift; lastKnownFileType = sourcecode.swift; sourceTree = SOURCE_ROOT; };
+        0000000000000000000000B3 = { isa = PBXBuildFile; fileRef = 0000000000000000000000B2; };
+        0000000000000000000000AC = { isa = PBXFileReference; path = AppleApp/TransportPrototype/ThirdPartyNotices.txt; lastKnownFileType = text; sourceTree = SOURCE_ROOT; };
+        0000000000000000000000AD = { isa = PBXBuildFile; fileRef = 0000000000000000000000AC; };
+		000000000000000000000014 = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = AppleApp/App;
+			sourceTree = "<group>";
+		};
+		000000000000000000000003 = {
+			isa = PBXGroup;
+			name = Products;
+			children = (0000000000000000000000C4, 000000000000000000000004, 000000000000000000000065, 000000000000000000000066);
+			sourceTree = "<group>";
+		};
+		00000000000000000000000D = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				MARKETING_VERSION = 0.1.0;
+				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = AppleApp/Signing/macOS.entitlements;
+				"CODE_SIGN_ENTITLEMENTS[sdk=iphone*]" = AppleApp/Signing/iOS.entitlements;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
+				PRODUCT_BUNDLE_IDENTIFIER = net.petterwooju.coreavpn.client;
+                "SWIFT_ACTIVE_COMPILATION_CONDITIONS[sdk=macosx*]" = "$(inherited) DIRECT_ROUTING";
+                "INFOPLIST_KEY_NSSystemExtensionUsageDescription[sdk=macosx*]" = "사용자가 선택한 라우팅 규칙을 네트워크 연결에 적용합니다.";
+                "SWIFT_INCLUDE_PATHS[sdk=macosx*]" = "$(inherited) $(SRCROOT)/AppleApp/NativeSpeed/include";
+				CURRENT_PROJECT_VERSION = 1;
+				INFOPLIST_KEY_CFBundleDisplayName = CoreaVPN;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				SUPPORTS_MACCATALYST = NO;
+				TARGETED_DEVICE_FAMILY = 1;
+				CODE_SIGN_STYLE = Automatic;
+				SDKROOT = auto;
+				PRODUCT_NAME = CoreaVPN;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				ENABLE_PREVIEWS = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+			};
+			name = Debug;
+		};
+		000000000000000000000008 = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (0000000000000000000000C6);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		000000000000000000000019 = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = AppleApp/Resources;
+			sourceTree = "<group>";
+		};
+		000000000000000000000001 = {
+			buildConfigurationList = 000000000000000000000006;
+			projectDirPath = "";
+			projectRoot = "";
+			knownRegions = (ko, en, Base);
+			isa = PBXProject;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 000000000000000000000003;
+			attributes = {
+				LastSwiftUpdateCheck = 1600;
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1600;
+				TargetAttributes = {
+					000000000000000000000005 = {
+						SystemCapabilities = {
+							com.apple.VPNLite = {
+								enabled = 1;
+							};
+						};
+						ProvisioningStyle = Automatic;
+						CreatedOnToolsVersion = 16.0;
+					};
+					000000000000000000000067 = {
+						CreatedOnToolsVersion = 16.0;
+						ProvisioningStyle = Automatic;
+					};
+					000000000000000000000068 = {
+						CreatedOnToolsVersion = 16.0;
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			developmentRegion = ko;
+			mainGroup = 000000000000000000000002;
+			targets = (0000000000000000000000CF, 000000000000000000000005, 000000000000000000000067, 000000000000000000000068);
+		};
+		000000000000000000000017 = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = AppleApp/Rules;
+			sourceTree = "<group>";
+		};
+		000000000000000000000006 = {
+			isa = XCConfigurationList;
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+			buildConfigurations = (00000000000000000000000B, 00000000000000000000000C);
+		};
+		00000000000000000000000B = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				SWIFT_VERSION = 5.0;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				CLANG_ENABLE_MODULES = YES;
+			};
+			name = Debug;
+		};
+		000000000000000000000015 = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = AppleApp/Benchmark;
+			sourceTree = "<group>";
+		};
+		000000000000000000000004 = {
+			path = CoreaVPN.app;
+			isa = PBXFileReference;
+			includeInIndex = 0;
+			explicitFileType = wrapper.application;
+			sourceTree = BUILT_PRODUCTS_DIR;
+		};
+		00000000000000000000000E = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				MARKETING_VERSION = 0.1.0;
+				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = AppleApp/Signing/macOS.entitlements;
+				"CODE_SIGN_ENTITLEMENTS[sdk=iphone*]" = AppleApp/Signing/iOS.entitlements;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
+				PRODUCT_BUNDLE_IDENTIFIER = net.petterwooju.coreavpn.client;
+                "SWIFT_ACTIVE_COMPILATION_CONDITIONS[sdk=macosx*]" = "$(inherited) DIRECT_ROUTING";
+                "INFOPLIST_KEY_NSSystemExtensionUsageDescription[sdk=macosx*]" = "사용자가 선택한 라우팅 규칙을 네트워크 연결에 적용합니다.";
+                "SWIFT_INCLUDE_PATHS[sdk=macosx*]" = "$(inherited) $(SRCROOT)/AppleApp/NativeSpeed/include";
+				CURRENT_PROJECT_VERSION = 1;
+				INFOPLIST_KEY_CFBundleDisplayName = CoreaVPN;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				SUPPORTS_MACCATALYST = NO;
+				TARGETED_DEVICE_FAMILY = 1;
+				CODE_SIGN_STYLE = Automatic;
+				SDKROOT = auto;
+				PRODUCT_NAME = CoreaVPN;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				ENABLE_PREVIEWS = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+			};
+			name = Release;
+		};
+		000000000000000000000009 = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = ();
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		000000000000000000000002 = {
+			isa = PBXGroup;
+			sourceTree = "<group>";
+			children = (0000000000000000000000D3, 0000000000000000000000C0, 0000000000000000000000C1, 0000000000000000000000C2, 0000000000000000000000C3, 000000000000000000000014, 000000000000000000000015, 000000000000000000000016, 000000000000000000000017, 000000000000000000000018, 000000000000000000000019, 000000000000000000000003, 000000000000000000000070);
+		};
+		00000000000000000000000C = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				SWIFT_VERSION = 5.0;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				CLANG_ENABLE_MODULES = YES;
+			};
+			name = Release;
+		};
+		000000000000000000000007 = {
+			isa = XCConfigurationList;
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+			buildConfigurations = (00000000000000000000000D, 00000000000000000000000E);
+		};
+		000000000000000000000018 = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = AppleApp/RouteLab;
+			sourceTree = "<group>";
+		};
+		000000000000000000000016 = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = AppleApp/Networking;
+			sourceTree = "<group>";
+		};
+		00000000000000000000000A = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = ();
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		000000000000000000000005 = {
+			dependencies = (0000000000000000000000CB);
+			buildConfigurationList = 000000000000000000000007;
+			productReference = 000000000000000000000004;
+			productType = "com.apple.product-type.application";
+			productName = CoreaVPN;
+			isa = PBXNativeTarget;
+			fileSystemSynchronizedGroups = (0000000000000000000000C1, 000000000000000000000014, 000000000000000000000015, 000000000000000000000016, 000000000000000000000017, 000000000000000000000018, 000000000000000000000019);
+			buildPhases = (0000000000000000000000C9, 000000000000000000000008, 000000000000000000000009, 00000000000000000000000A);
+			name = CoreaVPN;
+			buildRules = ();
+		};
+		00000000000000000000006F = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = AppleApp/LabHost;
+			sourceTree = "<group>";
+		};
+		000000000000000000000078 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = AppleApp/RoutingPrototype/SplitRoutePlanner.swift;
+			sourceTree = "<group>";
+		};
+		000000000000000000000079 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = AppleApp/RoutingPrototype/Extension/ScopedPacketTunnelProvider.swift;
+			sourceTree = "<group>";
+		};
+		00000000000000000000007A = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = AppleApp/Rules/RoutingRules.swift;
+			sourceTree = "<group>";
+		};
+		00000000000000000000007B = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = AppleApp/Networking/EndpointResolver.swift;
+			sourceTree = "<group>";
+		};
+		00000000000000000000007C = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = AppleApp/Benchmark/BenchmarkModels.swift;
+			sourceTree = "<group>";
+		};
+		000000000000000000000070 = {
+			isa = PBXGroup;
+			name = "Routing prototype";
+			children = (00000000000000000000006F, 0000000000000000000000B1, 0000000000000000000000B2, 0000000000000000000000AC, 000000000000000000000078, 000000000000000000000079, 00000000000000000000007A, 00000000000000000000007B, 00000000000000000000007C);
+			sourceTree = "<group>";
+		};
+		000000000000000000000065 = {
+			isa = PBXFileReference;
+			explicitFileType = wrapper.application;
+			includeInIndex = 0;
+			path = CoreaVPNLab.app;
+			sourceTree = BUILT_PRODUCTS_DIR;
+		};
+		000000000000000000000066 = {
+			isa = PBXFileReference;
+			explicitFileType = "wrapper.app-extension";
+			includeInIndex = 0;
+			path = ScopedTunnel.appex;
+			sourceTree = BUILT_PRODUCTS_DIR;
+		};
+		000000000000000000000082 = {
+			isa = PBXBuildFile;
+			fileRef = 000000000000000000000078;
+		};
+		000000000000000000000083 = {
+			isa = PBXBuildFile;
+			fileRef = 000000000000000000000066;
+			settings = {
+				ATTRIBUTES = (RemoveHeadersOnCopy, CodeSignOnCopy);
+			};
+		};
+		00000000000000000000008C = {
+			isa = PBXBuildFile;
+			fileRef = 000000000000000000000078;
+		};
+		00000000000000000000008D = {
+			isa = PBXBuildFile;
+			fileRef = 000000000000000000000079;
+		};
+		00000000000000000000008E = {
+			isa = PBXBuildFile;
+			fileRef = 00000000000000000000007A;
+		};
+		00000000000000000000008F = {
+			isa = PBXBuildFile;
+			fileRef = 00000000000000000000007B;
+		};
+		000000000000000000000090 = {
+			isa = PBXBuildFile;
+			fileRef = 00000000000000000000007C;
+		};
+		000000000000000000000097 = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (000000000000000000000082);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		000000000000000000000098 = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = ();
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		000000000000000000000099 = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = ();
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		00000000000000000000009A = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (000000000000000000000083);
+			runOnlyForDeploymentPostprocessing = 0;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			name = "Embed App Extensions";
+		};
+		00000000000000000000009B = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (00000000000000000000008C, 00000000000000000000008D, 00000000000000000000008E, 00000000000000000000008F, 000000000000000000000090, 0000000000000000000000B3);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		00000000000000000000009C = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = ();
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		00000000000000000000009D = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (0000000000000000000000AD);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		00000000000000000000009E = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 000000000000000000000001;
+			proxyType = 1;
+			remoteGlobalIDString = 000000000000000000000068;
+			remoteInfo = ScopedTunnel;
+		};
+		00000000000000000000009F = {
+			isa = PBXTargetDependency;
+			target = 000000000000000000000068;
+			targetProxy = 00000000000000000000009E;
+		};
+		0000000000000000000000A1 = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				MARKETING_VERSION = 0.1.0;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
+                MACOSX_DEPLOYMENT_TARGET = 14.0;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
+				PRODUCT_BUNDLE_IDENTIFIER = net.petterwooju.coreavpn.client.lab;
+                "SWIFT_INCLUDE_PATHS[sdk=macosx*]" = "$(inherited) $(SRCROOT)/AppleApp/NativeSpeed/include";
+				CURRENT_PROJECT_VERSION = 1;
+				INFOPLIST_KEY_CFBundleDisplayName = "CoreaVPN Lab";
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				SUPPORTS_MACCATALYST = NO;
+				TARGETED_DEVICE_FAMILY = 1;
+				CODE_SIGN_STYLE = Automatic;
+				SDKROOT = auto;
+				PRODUCT_NAME = CoreaVPNLab;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				ENABLE_PREVIEWS = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				CODE_SIGN_ENTITLEMENTS = AppleApp/Signing/LabHost.entitlements;
+                "CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = AppleApp/Signing/LabHost-macOS.entitlements;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) ROUTE_LAB";
+			};
+			name = Debug;
+		};
+		0000000000000000000000A2 = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				MARKETING_VERSION = 0.1.0;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
+                MACOSX_DEPLOYMENT_TARGET = 14.0;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
+				PRODUCT_BUNDLE_IDENTIFIER = net.petterwooju.coreavpn.client.lab;
+                "SWIFT_INCLUDE_PATHS[sdk=macosx*]" = "$(inherited) $(SRCROOT)/AppleApp/NativeSpeed/include";
+				CURRENT_PROJECT_VERSION = 1;
+				INFOPLIST_KEY_CFBundleDisplayName = "CoreaVPN Lab";
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				SUPPORTS_MACCATALYST = NO;
+				TARGETED_DEVICE_FAMILY = 1;
+				CODE_SIGN_STYLE = Automatic;
+				SDKROOT = auto;
+				PRODUCT_NAME = CoreaVPNLab;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				ENABLE_PREVIEWS = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				CODE_SIGN_ENTITLEMENTS = AppleApp/Signing/LabHost.entitlements;
+                "CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = AppleApp/Signing/LabHost-macOS.entitlements;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) ROUTE_LAB";
+			};
+			name = Release;
+		};
+		0000000000000000000000A0 = {
+			isa = XCConfigurationList;
+			buildConfigurations = (0000000000000000000000A1, 0000000000000000000000A2);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		0000000000000000000000A4 = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				MARKETING_VERSION = 0.1.0;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
+                MACOSX_DEPLOYMENT_TARGET = 14.0;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
+				PRODUCT_BUNDLE_IDENTIFIER = net.petterwooju.coreavpn.client.lab.tunnel;
+				CURRENT_PROJECT_VERSION = 1;
+				INFOPLIST_KEY_CFBundleDisplayName = CoreaVPN;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				SUPPORTS_MACCATALYST = NO;
+				TARGETED_DEVICE_FAMILY = 1;
+				CODE_SIGN_STYLE = Automatic;
+				SDKROOT = auto;
+				PRODUCT_NAME = ScopedTunnel;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				ENABLE_PREVIEWS = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				SKIP_INSTALL = YES;
+				CODE_SIGN_ENTITLEMENTS = AppleApp/Signing/LabTunnel.entitlements;
+                "CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = AppleApp/Signing/LabTunnel-macOS.entitlements;
+				APPLICATION_EXTENSION_API_ONLY = YES;
+                SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) PROXY_TRANSPORT";
+				INFOPLIST_FILE = "AppleApp/Signing/LabTunnel-Info.plist";
+				COREAVPN_LAB_ARTIFACTS = "$(SRCROOT)/.build/route-lab";
+                SWIFT_INCLUDE_PATHS = "$(SRCROOT)/AppleApp/TransportPrototype/include";
+				LIBRARY_SEARCH_PATHS = "\"$(COREAVPN_LAB_ARTIFACTS)/$(PLATFORM_NAME)\"";
+				OTHER_LDFLAGS = ("$(inherited)", "-lCoreIPSec", "-lresolv", "-framework", Security, "-framework", CoreFoundation);
+			};
+			name = Debug;
+		};
+		0000000000000000000000A5 = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				MARKETING_VERSION = 0.1.0;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
+                MACOSX_DEPLOYMENT_TARGET = 14.0;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
+				PRODUCT_BUNDLE_IDENTIFIER = net.petterwooju.coreavpn.client.lab.tunnel;
+				CURRENT_PROJECT_VERSION = 1;
+				INFOPLIST_KEY_CFBundleDisplayName = CoreaVPN;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				SUPPORTS_MACCATALYST = NO;
+				TARGETED_DEVICE_FAMILY = 1;
+				CODE_SIGN_STYLE = Automatic;
+				SDKROOT = auto;
+				PRODUCT_NAME = ScopedTunnel;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				ENABLE_PREVIEWS = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				SKIP_INSTALL = YES;
+				CODE_SIGN_ENTITLEMENTS = AppleApp/Signing/LabTunnel.entitlements;
+                "CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = AppleApp/Signing/LabTunnel-macOS.entitlements;
+				APPLICATION_EXTENSION_API_ONLY = YES;
+                SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) PROXY_TRANSPORT";
+				INFOPLIST_FILE = "AppleApp/Signing/LabTunnel-Info.plist";
+				COREAVPN_LAB_ARTIFACTS = "$(SRCROOT)/.build/route-lab";
+                SWIFT_INCLUDE_PATHS = "$(SRCROOT)/AppleApp/TransportPrototype/include";
+				LIBRARY_SEARCH_PATHS = "\"$(COREAVPN_LAB_ARTIFACTS)/$(PLATFORM_NAME)\"";
+				OTHER_LDFLAGS = ("$(inherited)", "-lCoreIPSec", "-lresolv", "-framework", Security, "-framework", CoreFoundation);
+			};
+			name = Release;
+		};
+		0000000000000000000000A3 = {
+			isa = XCConfigurationList;
+			buildConfigurations = (0000000000000000000000A4, 0000000000000000000000A5);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		000000000000000000000067 = {
+			isa = PBXNativeTarget;
+			name = CoreaVPNLab;
+			productName = CoreaVPNLab;
+			buildConfigurationList = 0000000000000000000000A0;
+			buildPhases = (000000000000000000000097, 000000000000000000000098, 000000000000000000000099, 00000000000000000000009A);
+			buildRules = ();
+			dependencies = (00000000000000000000009F);
+			fileSystemSynchronizedGroups = (000000000000000000000014, 000000000000000000000015, 000000000000000000000016, 000000000000000000000017, 000000000000000000000018, 000000000000000000000019, 00000000000000000000006F, 0000000000000000000000B1);
+			productReference = 000000000000000000000065;
+			productType = "com.apple.product-type.application";
+		};
+		000000000000000000000068 = {
+			isa = PBXNativeTarget;
+			name = ScopedTunnel;
+			productName = ScopedTunnel;
+			buildConfigurationList = 0000000000000000000000A3;
+			buildPhases = (00000000000000000000009B, 00000000000000000000009C, 00000000000000000000009D);
+			buildRules = ();
+			dependencies = ();
+			fileSystemSynchronizedGroups = ();
+			productReference = 000000000000000000000066;
+			productType = "com.apple.product-type.app-extension";
+		};
+	};
+	rootObject = 000000000000000000000001;
+}

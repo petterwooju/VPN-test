@@ -1,0 +1,5 @@
+module CoreaSpeed [system] {
+    header "CoreaSpeed.h"
+    link "curl"
+    export *
+}

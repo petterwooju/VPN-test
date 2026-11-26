@@ -1,0 +1,4 @@
+module CoreIPSec {
+    header "CoreIPSec.h"
+    export *
+}
