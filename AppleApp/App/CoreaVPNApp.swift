@@ -195,7 +195,12 @@ struct ConnectionView: View {
                                 Spacer()
                                 Text(server.group).foregroundStyle(.secondary)
                             }
-                            if let status = model.exclusion(server) ?? model.dnsErrors[server.host] ?? model.addresses[server.host] {
+                            #if os(macOS)
+                            let exclusion = model.exclusion(server).map { "빠른 연결 제외 · " + $0 }
+                            #else
+                            let exclusion = model.exclusion(server)
+                            #endif
+                            if let status = exclusion ?? model.dnsErrors[server.host] ?? model.addresses[server.host] {
                                 Text(status).font(.caption).foregroundStyle(.secondary)
                             }
                         }

@@ -49,6 +49,40 @@ private final class TrialDriver: BenchmarkDriver {
 @main
 struct BenchmarkChecks {
     @MainActor
+    private static func fullMacComparison(in root: URL, network: BenchmarkNetwork) async throws {
+        // Older installations can disable D/E and reserve a second device's group.
+        let configured = CoreaServer.catalog.filter { !$0.requiresExtendedAccount && $0.group != "B" }
+        let candidates = ScanMode.all.candidates(configured: configured)
+        precondition(candidates == CoreaServer.catalog && candidates.count == 23)
+        precondition(ScanMode.quick.candidates(configured: configured) == configured)
+        precondition(ScanMode.fastQuick.candidates(configured: configured) == configured)
+        let store = try BenchmarkStore(fileURL: root.appendingPathComponent("full-comparison.json"))
+        let driver = TrialDriver()
+        let scanner = BenchmarkScanner(store: store, driver: driver)
+        let extended = candidates.filter(\.requiresExtendedAccount)
+        precondition(extended.count == 6)
+        let failed = extended[0].host
+        driver.failHosts = [failed]
+        for server in extended.dropFirst() {
+            driver.results[server.host] = try PingSample(sent: 20, received: 20, meanMS: 70)
+            driver.speeds[server.host] = HTTPSBenchmarkSample(sent: 20, received: 20, averageMS: 50,
+                downloadMbps: 10, uploadMbps: 4, downloadLoadedMS: 65, uploadLoadedMS: 55,
+                downloadBytes: 1_250_000, uploadBytes: 500_000, downloadSeconds: 1, uploadSeconds: 1)
+        }
+        let run = try await scanner.run(mode: .all, network: network, candidates: candidates)
+        precondition(run.phase == .completed && driver.visits == candidates.map(\.host))
+        precondition(run.rows.allSatisfy { $0.outcome != .skipped && $0.outcome != .notRun })
+        precondition(run.rows.first { $0.host == failed }?.outcome == .failed)
+        for server in extended.dropFirst() {
+            let row = run.rows.first { $0.host == server.host }
+            precondition(row?.outcome == .measured && row?.sample?.received == 20 && row?.httpsSample?.downloadMbps == 10)
+        }
+        let chosen = extended.last!.host
+        let selected = try await scanner.connectSelected(host: chosen, runID: run.id, network: network, isNetworkCurrent: { true })
+        precondition(selected.selectedHost == chosen && driver.chosen == [chosen])
+    }
+
+    @MainActor
     private static func localPumaImport(in root: URL) throws {
         let records = root.appendingPathComponent("local-puma.json")
         let store = try BenchmarkStore(fileURL: records)
@@ -170,6 +204,7 @@ struct BenchmarkChecks {
         precondition(abs(store.rankings(for: reference)[0].meanMS! - 52.965) < 0.00001)
         precondition(store.runs[0].rows.filter { $0.sample?.qualifies == true }.count == 10)
         let network = BenchmarkNetwork(deviceID: "test", label: "Office", interface: "en0", transport: "wifi")
+        try await fullMacComparison(in: path, network: network)
         precondition(store.rankings(for: network).isEmpty)
         let candidate = Array(CoreaServer.catalog.prefix(4))
         let hosts = candidate.map(\.host)

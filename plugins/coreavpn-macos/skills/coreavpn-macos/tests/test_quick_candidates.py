@@ -26,6 +26,16 @@ def ping_result(host, mean=100, received=20):
 
 
 class QuickCandidatesTests(unittest.TestCase):
+    def test_d_and_e_use_their_official_hostnames_without_the_net_resolver(self):
+        direct = [host for host in quick.CATALOG if not host.endswith(".net")]
+        self.assertEqual(sum(host.endswith(".com") for host in direct), 4)
+        self.assertEqual(sum(host.endswith(".kr") for host in direct), 2)
+        self.assertEqual(quick.candidate_order(direct), direct)
+        with patch.object(quick.pilot, "command", side_effect=AssertionError("Unexpected .net lookup")):
+            for host in direct:
+                with self.subTest(host=host):
+                    self.assertEqual(quick.endpoint({}, host), host)
+
     def test_non_ui_health_and_reused_tunnel_name(self):
         plan = dict(device="en6", service="Ethernet", physical_address="10.0.1.2", tunnel_index=7)
         with patch.object(quick.pilot, "route", return_value="ipsec4") as route, \

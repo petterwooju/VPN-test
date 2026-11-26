@@ -38,6 +38,8 @@ struct AccountView: View {
                         ForEach(["A","B","C","D","E"], id: \.self) { Text($0).tag($0) }
                     }.onChange(of: model.excludedGroup) { _,_ in model.saveSettings() }
                     #if os(macOS)
+                    Text("전체 테스트는 이 설정과 관계없이 A~E 그룹 서버 \(CoreaServer.catalog.count)개에 모두 연결을 시도합니다.")
+                        .font(.caption).foregroundStyle(.secondary)
                     if model.link.interface == "en6", model.link.transport == "ethernet" {
                         Button("기존 베이징 유선 기록을 현재 회선에 연결") { binding = true }
                             .disabled(model.routeLabel.isEmpty)

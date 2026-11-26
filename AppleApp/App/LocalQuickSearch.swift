@@ -266,8 +266,8 @@ final class LocalQuickSearch: ObservableObject {
     }
 
     @discardableResult
-    func startAll(hosts: [String], network: BenchmarkNetwork) -> Bool {
-        begin(.all, hosts: hosts, network: network)
+    func startAll(network: BenchmarkNetwork) -> Bool {
+        begin(.all, hosts: CoreaServer.catalog.map(\.host), network: network)
     }
 
     @discardableResult

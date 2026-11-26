@@ -332,7 +332,7 @@ final class SessionModel: ObservableObject {
     func canResume(_ run: BenchmarkRun) -> Bool {
         guard run.canResume, run.network == network, run.recoveryNeeded != true else { return false }
         #if os(macOS)
-        return run.mode != .all || run.paired == true
+        return run.mode != .all || (run.paired == true && Set(run.order) == Set(CoreaServer.catalog.map(\.host)))
         #else
         return true
         #endif
@@ -355,7 +355,7 @@ final class SessionModel: ObservableObject {
             #else
             let paired = false
             #endif
-            let finished = try await scanner.run(mode: mode, network: scope, candidates: candidates, resumeID: resume, paired: paired,
+            let finished = try await scanner.run(mode: mode, network: scope, candidates: mode.candidates(configured: candidates), resumeID: resume, paired: paired,
                 isNetworkCurrent: { self.link == original && self.network == scope },
                 onProgress: { self.active = $0 })
             active = finished
@@ -366,7 +366,8 @@ final class SessionModel: ObservableObject {
         await refreshStatus()
     }
     func connectSelected(host: String, in run: BenchmarkRun) async {
-        guard !busy, !previewBuild, link.available, candidates.contains(where: { $0.host == host }) else { return }
+        guard !busy, !previewBuild, link.available,
+              run.mode.candidates(configured: candidates).contains(where: { $0.host == host }) else { return }
         let original = link, scope = network
         work = "selection"
         defer { work = "" }

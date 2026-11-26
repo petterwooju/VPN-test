@@ -19,7 +19,7 @@ struct LocalQuickSection: View {
 
     private var blocked: Bool {
         !quick.available || quick.running || quick.canRelease || pilot.running || model.busy ||
-            !model.link.available || model.network.label.isEmpty || model.candidates.isEmpty
+            !model.link.available || model.network.label.isEmpty
     }
 
     private func run(_ method: LocalMeasurement) {
@@ -33,15 +33,15 @@ struct LocalQuickSection: View {
                 Label("168.126.63.1 100ms 이하 서버 연결", systemImage: "waveform.path.ecg")
             }
             .accessibilityIdentifier("quick-start")
-            .disabled(blocked)
+            .disabled(blocked || model.candidates.isEmpty)
             Button { run(.https) } label: {
                 Label("FAST 다운로드 10Mbps 이상 서버 연결", systemImage: "arrow.down.circle")
             }
             .accessibilityIdentifier("quick-fast-start")
-            .disabled(blocked)
+            .disabled(blocked || model.candidates.isEmpty)
             Button {
                 importMessage = ""
-                quick.startAll(hosts: model.candidates.map(\.host), network: model.network)
+                quick.startAll(network: model.network)
             } label: {
                 Label("전체 테스트 후 서버 선택", systemImage: "list.number")
             }

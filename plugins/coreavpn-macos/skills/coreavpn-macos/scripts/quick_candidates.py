@@ -20,11 +20,11 @@ spec.loader.exec_module(pilot)
 uplink = runpy.run_path(str(pilot.SKILL / "assets/Puma-DNS/uplink.py"))
 PROFILE = pilot.TEST_PROFILE
 LEO = "leo.coreavpn.net"
-HOSTS = set(json.loads((SCRIPTS.parent / "assets/servers.json").read_text()))
+CATALOG = tuple(json.loads((SCRIPTS.parent / "assets/servers.json").read_text()))
 
 
 def candidate_order(hosts):
-    if not hosts or len(hosts) != len(set(hosts)) or any(h not in HOSTS for h in hosts):
+    if not hosts or len(hosts) != len(set(hosts)) or any(h not in CATALOG for h in hosts):
         raise ValueError("Expected a nonempty ordered list of distinct supported CoreaVPN servers")
     return ([LEO] if LEO in hosts else []) + [h for h in hosts if h != LEO]
 
@@ -118,7 +118,7 @@ def verify_baseline(plan):
 def still_connected(plan, host, tunnel, destination):
     # The named switch was verified before measuring. Track that kernel interface,
     # including reuse of its ipsecN name, without consulting System Settings.
-    return (host in HOSTS and re.fullmatch(r"ipsec\d+", tunnel) is not None and
+    return (host in CATALOG and re.fullmatch(r"ipsec\d+", tunnel) is not None and
             pilot.route(destination) == tunnel and socket.if_nametoindex(tunnel) == plan["tunnel_index"] and
             same_uplink(plan) and not pilot.fl_proxy_listening(plan))
 

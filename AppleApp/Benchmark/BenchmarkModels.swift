@@ -41,7 +41,16 @@ struct BenchmarkNetwork: Hashable, Codable {
                                                     label: "Beijing office", interface: "en6", transport: "ethernet")
 }
 
-enum ScanMode: String, Codable { case quick, fastQuick, all, puma }
+enum ScanMode: String, Codable {
+    case quick, fastQuick, all, puma
+
+    func candidates(configured: [CoreaServer]) -> [CoreaServer] {
+        #if os(macOS)
+        if self == .all { return CoreaServer.catalog }
+        #endif
+        return configured
+    }
+}
 enum ScanPhase: String, Codable { case scanning, paused, retained, completed, cancelled, failed }
 enum AttemptOutcome: String, Codable { case measured, noReply, failed, skipped, partial, stopped, notRun }
 

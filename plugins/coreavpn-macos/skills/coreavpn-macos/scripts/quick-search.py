@@ -128,7 +128,7 @@ def watch(run, proc, owner, hosts, measurement, operation):
             if code or winner is not None:
                 return "failed", winner, "Search or retained connection monitor stopped"
             if operation == "all":
-                return "completed", None, "All eligible candidates examined"
+                return "completed", None, f"Finished examining {len(hosts)} requested servers"
             if operation == "select":
                 return "failed", None, "The selected server could not be retained"
             return "no-match", None, f"No candidate met the {measurement.upper()} measurement thresholds"
@@ -295,7 +295,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--ui", type=Path)
     parser.add_argument("--fl-map", type=Path)
-    parser.add_argument("--hosts", nargs="+")
+    parser.add_argument("--hosts", nargs="+", help="Server hostnames in order (default for all: the full catalog)")
     parser.add_argument("--expected-device", help="Physical interface recorded by the app")
     parser.add_argument("--expected-prefix", help="IPv4 subnet recorded by the app")
     parser.add_argument("--operation", choices=OPERATIONS, default="quick",
@@ -330,8 +330,11 @@ def main():
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         if args.recover:
             return retry_recovery(run)
+        if args.operation == "all" and args.hosts is None:
+            from quick_candidates import CATALOG
+            args.hosts = CATALOG
         if not args.ui or not args.fl_map or not args.hosts:
-            parser.error("--ui, --fl-map, --hosts are required to prepare a new run")
+            parser.error("--ui and --fl-map are required; quick and select also require --hosts")
         return launch(run, args, lock)
 
 
