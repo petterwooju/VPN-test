@@ -4,6 +4,7 @@ import re
 
 from https_speed import TARGET as HTTPS_TARGET, public_ipv4
 
+QUICK_MINIMUM_DOWNLOAD_MBPS = 50
 ICMP_TARGET = "168.126.63.1"
 MEASUREMENTS = ("https", "icmp")
 DEFAULT_MEASUREMENT = "https"
@@ -40,7 +41,7 @@ def qualifies(sample, hosts, expected_tunnel=None, *, measurement=DEFAULT_MEASUR
         download = statistics.get("download_mbps")
         count = statistics.get("download_bytes")
         seconds = statistics.get("download_seconds")
-        return (type(download) in (float, int) and math.isfinite(download) and download >= 10
+        return (type(download) in (float, int) and math.isfinite(download) and download >= QUICK_MINIMUM_DOWNLOAD_MBPS
                 and type(count) is int and count > 0 and type(seconds) in (float, int)
                 and math.isfinite(seconds) and seconds > 0
                 and math.isclose(download, 8 * count / (1_000_000 * seconds), rel_tol=1e-9))
