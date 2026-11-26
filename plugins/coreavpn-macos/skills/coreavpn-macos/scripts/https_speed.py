@@ -67,6 +67,26 @@ def remaining(deadline):
     return seconds
 
 
+class DownloadResponseError(http.client.HTTPException):
+    def __init__(self, kind, message):
+        super().__init__(message)
+        self.kind = kind
+
+
+def download_error_kind(error):
+    if isinstance(error, DownloadResponseError):
+        return error.kind
+    if isinstance(error, (socket.timeout, TimeoutError)):
+        return "timeout"
+    if isinstance(error, (http.client.IncompleteRead, http.client.RemoteDisconnected, ssl.SSLEOFError)):
+        return "early_eof"
+    if isinstance(error, ssl.SSLError):
+        return "tls"
+    if isinstance(error, ConnectionResetError):
+        return "connection_reset"
+    return "socket" if isinstance(error, OSError) else "http"
+
+
 class BoundHTTPSConnection(http.client.HTTPSConnection):
     def __init__(self, peer_ipv4, tunnel, interface_index, context):
         super().__init__(TARGET, timeout=CONNECT_SECONDS, context=context)
@@ -78,6 +98,7 @@ class BoundHTTPSConnection(http.client.HTTPSConnection):
     def connect(self):
         # Bind before connecting to a pinned A record. The URL, Host header and
         # validated TLS SNI remain speed.cloudflare.com.
+        self.stage = "tcp_connect"
         if sys.platform != "darwin" or socket.if_nametoindex(self.tunnel) != self.interface_index:
             raise OSError("The verified IKEv2 interface is unavailable")
         raw = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -87,6 +108,7 @@ class BoundHTTPSConnection(http.client.HTTPSConnection):
             raw.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
             raw.connect((self.peer_ipv4, 443))
             raw.settimeout(min(CONNECT_SECONDS, remaining(self.deadline)))
+            self.stage = "tls_handshake"
             self.sock = self._context.wrap_socket(raw, server_hostname=TARGET)
         except BaseException:
             raw.close()
@@ -99,7 +121,9 @@ class BoundHTTPSConnection(http.client.HTTPSConnection):
         self.sock.settimeout(remaining(deadline))
 
     def response(self, deadline, *, download=None, upload=None, on_sent=None):
+        self.stage = "request"
         self.begin(deadline)
+        self.stage = "request"
         headers = {"Accept-Encoding": "identity", "Cache-Control": "no-cache, no-store"}
         nonce = uuid4().hex
         if upload is None:
@@ -109,6 +133,7 @@ class BoundHTTPSConnection(http.client.HTTPSConnection):
             self.request("POST", f"/__up?nonce={nonce}", body=upload, headers=headers)
         if on_sent is not None:
             on_sent()  # The complete HTTP request has been handed to the TLS socket.
+        self.stage = "response_headers"
         self.sock.settimeout(remaining(deadline))
         # HTTPConnection can detach a socket when the server closes after this
         # response. Our socket reference still controls the response read timeout.
@@ -116,10 +141,10 @@ class BoundHTTPSConnection(http.client.HTTPSConnection):
         response = self.getresponse()
         if not 200 <= response.status < 300:
             response.close()
-            raise http.client.HTTPException(f"HTTPS measurement server returned {response.status}")
+            raise DownloadResponseError("http_status", f"HTTPS measurement server returned {response.status}")
         if response.getheader("Content-Encoding", "identity").lower() != "identity":
             response.close()
-            raise http.client.HTTPException("Unexpected encoding on HTTPS measurement response")
+            raise DownloadResponseError("encoding", "Unexpected encoding on HTTPS measurement response")
         return response, response_socket
 
 
@@ -138,22 +163,42 @@ def latency_request(connection, deadline, on_sent=None):
         return None
 
 
-def receive(connection, size, deadline):
-    response, peer_socket = connection.response(deadline, download=size)
+def receive(connection, size, deadline, diagnostic=None):
+    started = time.monotonic()
     count = 0
-    with response:
-        if response.length is not None and response.length != size:
-            raise http.client.HTTPException("Unexpected HTTPS download size")
-        while count < size:
+    stage = None
+    try:
+        response, peer_socket = connection.response(deadline, download=size)
+        with response:
+            stage = "response_headers"
+            if response.length is not None and response.length != size:
+                raise DownloadResponseError("length", f"Expected {size} bytes, received Content-Length {response.length}")
+            stage = "body"
+            while count < size:
+                peer_socket.settimeout(remaining(deadline))
+                block = response.read1(min(64 * 1024, size - count))
+                if not block:
+                    raise DownloadResponseError("early_eof", "Response body ended before the requested size")
+                count += len(block)
+            stage = "end_validation"
             peer_socket.settimeout(remaining(deadline))
-            block = response.read1(min(64 * 1024, size - count))
-            if not block:
-                raise http.client.HTTPException("Incomplete HTTPS download")
-            count += len(block)
-        peer_socket.settimeout(remaining(deadline))
-        if response.read(1):
-            raise http.client.HTTPException("HTTPS download exceeded the requested size")
-    return count
+            if response.read(1):
+                count += 1
+                raise DownloadResponseError("length", "HTTPS download exceeded the requested size")
+        if diagnostic is not None:
+            diagnostic.update(status="complete", stage="complete")
+        return count
+    except HTTP_FAILURES as error:
+        if isinstance(error, http.client.IncompleteRead):
+            count += len(error.partial)
+        if diagnostic is not None:
+            diagnostic.update(status="failed", stage=stage or connection.stage,
+                              error_type=download_error_kind(error),
+                              error_class=type(error).__name__, error=str(error) or type(error).__name__)
+        raise
+    finally:
+        if diagnostic is not None:
+            diagnostic.update(expected_bytes=size, received_bytes=count, elapsed_seconds=time.monotonic() - started)
 
 
 def transmit(connection, payload, deadline):
@@ -174,10 +219,10 @@ def transmit(connection, payload, deadline):
     return confirmed
 
 
-def prepare_lane(new_connection, deadline):
+def prepare_lane(new_connection, deadline, diagnostic=None):
     connection = new_connection()
     try:
-        if receive(connection, WARMUP_BYTES, deadline) == WARMUP_BYTES:
+        if receive(connection, WARMUP_BYTES, deadline, diagnostic) == WARMUP_BYTES:
             return connection
     except HTTP_FAILURES:
         pass
@@ -185,28 +230,39 @@ def prepare_lane(new_connection, deadline):
     return None
 
 
-def transfer_lane(connection, payload, deadline):
+def transfer_lane(connection, payload, deadline, diagnostic=None):
     try:
         count = (transmit(connection, payload, deadline) if payload is not None
-                 else receive(connection, DOWNLOAD_PER_CONNECTION, deadline))
+                 else receive(connection, DOWNLOAD_PER_CONNECTION, deadline, diagnostic))
     except HTTP_FAILURES:
         count = 0
     return count, time.monotonic()
 
 
-def transfer_phase(new_connection, latency_connection, *, upload=False):
+def transfer_phase(new_connection, latency_connection, *, upload=False, download_lanes=None):
     payload = os.urandom(UPLOAD_BLOCK) if upload else None
     with ThreadPoolExecutor(max_workers=PARALLEL_CONNECTIONS) as pool:
         warm_deadline = time.monotonic() + CONNECT_SECONDS
-        lanes = [pool.submit(prepare_lane, new_connection, warm_deadline)
-                 for _ in range(PARALLEL_CONNECTIONS)]
-        connections = [connection for lane in lanes if (connection := lane.result()) is not None]
+        lanes = []
+        for index in range(PARALLEL_CONNECTIONS):
+            report = None
+            if download_lanes is not None:
+                report = dict(lane=index + 1, warmup={}, transfer=None)
+                download_lanes.append(report)
+            future = pool.submit(prepare_lane, new_connection, warm_deadline, report["warmup"] if report else None)
+            lanes.append((future, report))
+        connections = [(conn, report) for future, report in lanes if (conn := future.result()) is not None]
         if not connections:
             return 0, None, None
         started = time.monotonic()
         deadline = started + TRANSFER_SECONDS
         try:
-            transfers = [pool.submit(transfer_lane, conn, payload, deadline) for conn in connections]
+            transfers = []
+            for conn, report in connections:
+                diagnostic = None
+                if report is not None:
+                    diagnostic = report["transfer"] = {}
+                transfers.append(pool.submit(transfer_lane, conn, payload, deadline, diagnostic))
             # Time each worker independently so a final latency request cannot
             # lengthen the throughput denominator after the data has finished.
             loaded = []
@@ -218,7 +274,7 @@ def transfer_phase(new_connection, latency_connection, *, upload=False):
                     time.sleep(0.075)
             results = [transfer.result() for transfer in transfers]
         finally:
-            for connection in connections:
+            for connection, _ in connections:
                 connection.close()
     count = sum(size for size, _ in results)
     duration = max(finished for _, finished in results) - started
@@ -275,7 +331,11 @@ def measure(server, peer_ipv4, tunnel, download_checkpoint=None, idle_checkpoint
                 checkpoint(idle_checkpoint)
             for mode in ("download", "upload"):
                 try:
-                    size, elapsed, loaded = transfer_phase(new_connection, connection, upload=mode == "upload")
+                    download_lanes = None
+                    if mode == "download":
+                        download_lanes = entry["download_lanes"] = []
+                    size, elapsed, loaded = transfer_phase(new_connection, connection, upload=mode == "upload",
+                                                           download_lanes=download_lanes)
                     stats[mode + "_bytes"] = size
                     stats[mode + "_loaded_ms"] = loaded
                     if size and elapsed and elapsed > 0:
@@ -289,7 +349,7 @@ def measure(server, peer_ipv4, tunnel, download_checkpoint=None, idle_checkpoint
                         entry.setdefault("errors", {})[mode] = f"HTTPS {mode}: {reason}"
                 except HTTP_FAILURES as error:
                     entry.setdefault("errors", {})[mode] = f"HTTPS {mode}: {error or 'transfer failed'}"
-                if mode == "download" and (stats["sent"] or stats["download_mbps"] is not None):
+                if mode == "download" and (entry["download_lanes"] or stats["sent"] or stats["download_mbps"] is not None):
                     checkpoint(download_checkpoint)
         finally:
             connection.close()

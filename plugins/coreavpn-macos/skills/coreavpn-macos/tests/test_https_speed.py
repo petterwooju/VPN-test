@@ -3,6 +3,7 @@ import http.client
 import json
 from pathlib import Path
 import socket
+from queue import SimpleQueue
 import ssl
 import sys
 import tempfile
@@ -139,6 +140,81 @@ class HTTPSSpeedTests(unittest.TestCase):
         channel.response.return_value = response, peer_socket
         with self.assertRaises(TimeoutError):
             speed.receive(channel, 100, speed.time.monotonic() + 1)
+
+    def test_diagnostic_distinguishes_partial_socket_timeout_short_body_and_bad_headers(self):
+        for steps, length, expected, kind, stage in [
+            ([b"x" * 37, socket.timeout("timed out")], 100, 37, "timeout", "body"),
+            ([b"x" * 14, b""], 100, 14, "early_eof", "body"),
+            ([], 50, 0, "length", "response_headers"),
+        ]:
+            with self.subTest(kind=kind):
+                response = MagicMock(length=length)
+                response.read1.side_effect = steps
+                channel = Mock()
+                channel.response.return_value = response, Mock()
+                diagnostic = {}
+                with self.assertRaises(speed.HTTP_FAILURES):
+                    speed.receive(channel, 100, speed.time.monotonic() + 1, diagnostic)
+                self.assertEqual(diagnostic["stage"], stage)
+                self.assertEqual(diagnostic["error_type"], kind)
+                self.assertEqual(diagnostic["status"], "failed")
+                self.assertEqual(diagnostic["received_bytes"], expected)
+                self.assertEqual(diagnostic["expected_bytes"], 100)
+                self.assertGreaterEqual(diagnostic["elapsed_seconds"], 0)
+
+    def test_download_lanes_are_in_final_record_and_checkpoint_without_partial_credit(self):
+        # All four pools use the same fixed body/deadline policy. One warm-up never
+        # finishes, one transfer times out after a prefix, and two transfers finish.
+        roles = SimpleQueue()
+        for role in ["warmup_timeout", "transfer_timeout", "complete", "complete"]:
+            roles.put(role)
+
+        class Channel:
+            def response(self, deadline, *, download):
+                if self.role == "warmup_timeout":
+                    self.stage = "response_headers"
+                    raise socket.timeout("timed out awaiting headers")
+                response = MagicMock(length=download)
+                response.read.return_value = b""
+                response.read1.side_effect = ([b"x" * 15, socket.timeout("read timed out")]
+                    if self.role == "transfer_timeout" and download == 128 else [b"x" * download])
+                return response, Mock()
+
+            def close(self):
+                pass
+
+        def connect():
+            channel = Channel()
+            channel.role = roles.get_nowait()
+            return channel
+
+        original_phase = speed.transfer_phase
+        def phase(factory, channel, *, upload, download_lanes):
+            if upload:
+                return 4096, 0.1, None
+            return original_phase(connect, channel, download_lanes=download_lanes)
+
+        checkpoint = Mock()
+        with patch.object(speed, "route_interface", return_value=TUNNEL), \
+             patch.object(speed.socket, "if_nametoindex", return_value=7), \
+             patch.object(speed, "BoundHTTPSConnection"), \
+             patch.object(speed, "WARMUP_BYTES", 8), patch.object(speed, "DOWNLOAD_PER_CONNECTION", 128), \
+             patch.object(speed, "latency_request", return_value=None), \
+             patch.object(speed, "transfer_phase", side_effect=phase):
+            result = speed.measure(HOST, PEER, TUNNEL, download_checkpoint=checkpoint)
+        reports = result["download_lanes"]
+        self.assertEqual(checkpoint.call_args.args[0]["download_lanes"], reports)
+        self.assertEqual([r["lane"] for r in reports], [1, 2, 3, 4])
+        skipped, = [r["warmup"] for r in reports if r["transfer"] is None]
+        self.assertEqual((skipped["stage"], skipped["error_type"]), ("response_headers", "timeout"))
+        transfers = [r["transfer"] for r in reports if r["transfer"] is not None]
+        self.assertEqual(sorted(t["received_bytes"] for t in transfers), [15, 128, 128])
+        failed, = [t for t in transfers if t["status"] == "failed"]
+        self.assertEqual((failed["stage"], failed["error_type"]), ("body", "timeout"))
+        self.assertIsNone(result["speed"]["download_mbps"])
+        self.assertIsNone(result["speed"]["download_bytes"])
+        self.assertEqual(result["errors"]["download"], "HTTPS download: Incomplete parallel download")
+        self.assertTrue(result["valid"])
 
     def test_one_incomplete_download_lane_invalidates_rate_but_keeps_other_measurements(self):
         complete = speed.DOWNLOAD_PER_CONNECTION
