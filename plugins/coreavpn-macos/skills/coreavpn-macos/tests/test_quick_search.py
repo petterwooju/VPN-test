@@ -86,14 +86,16 @@ runner.SCRIPT=Path(__file__).resolve()
 runner.GLOBAL_LOCK=runner.SCRIPT.parent / "fixture.lock"
 sys.exit(runner.main())
 ''')
-        (self.base / "quick_candidates.py").write_text(FAKE)
+        catalog = json.loads((SCRIPT.parents[1] / "assets/servers.json").read_text())
+        (self.base / "quick_candidates.py").write_text(f"CATALOG = {catalog!r}\n" + FAKE)
         self.output = (self.base / "test-output").open("w")
         self.addCleanup(self.output.close)
 
-    def start(self, mode, measurement=None, operation="quick"):
+    def start(self, mode, measurement=None, operation="quick", hosts=("leo.coreavpn.net",)):
         selection = [] if measurement is None else ["--measurement", measurement]
+        host_args = ["--hosts", *hosts] if hosts else []
         return subprocess.Popen([sys.executable, "-B", str(self.wrapper), "--log-dir", str(self.run_dir),
-                                 "--ui", mode, "--fl-map", "fixture-map", "--hosts", "leo.coreavpn.net",
+                                 "--ui", mode, "--fl-map", "fixture-map", *host_args,
                                  "--operation", operation, *selection, "--run"],
                                 stdin=subprocess.DEVNULL, stdout=self.output, stderr=self.output)
 
@@ -157,7 +159,10 @@ sys.exit(runner.main())
         self.wait_for(lambda: self.state()["phase"] == "released")
 
     def test_all_returns_to_baseline_without_selecting(self):
-        self.assertEqual(self.start("batch", operation="all").wait(timeout=12), 0)
+        self.assertEqual(self.start("batch", operation="all", hosts=None).wait(timeout=12), 0)
+        hosts = json.loads((self.run_dir / "quick-hosts.json").read_text())
+        self.assertEqual(hosts, json.loads((SCRIPT.parents[1] / "assets/servers.json").read_text()))
+        self.assertEqual(len(hosts), 23)
         self.assertEqual(self.state()["phase"], "completed")
         self.assertTrue(self.state()["recovered"])
         self.assertFalse((self.run_dir / "winner.json").exists())
