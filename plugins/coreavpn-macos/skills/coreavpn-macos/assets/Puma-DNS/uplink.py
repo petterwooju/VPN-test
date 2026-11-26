@@ -3,15 +3,18 @@ import re
 import subprocess
 
 
-def active_link():
-    def read(*argv):
-        return subprocess.check_output(argv, text=True, timeout=5)
-    nwi = read("/usr/sbin/scutil", "--nwi").split("IPv6 network interface")[0]
+def active_device():
+    nwi = subprocess.check_output(["/usr/sbin/scutil", "--nwi"], text=True, timeout=5)
+    nwi = nwi.split("IPv6 network interface")[0]
     match = re.search(r"^\s*(en[0-9]+) : flags.*IPv4", nwi, re.M)
-    if not match:
+    return match[1] if match else None
+
+
+def active_link():
+    device = active_device()
+    if device is None:
         raise RuntimeError("No active physical IPv4 uplink")
-    device = match[1]
-    services = read("/usr/sbin/networksetup", "-listnetworkserviceorder")
+    services = subprocess.check_output(["/usr/sbin/networksetup", "-listnetworkserviceorder"], text=True, timeout=5)
     matches = re.findall(r"^\(\d+\) (.+)\n\(Hardware Port: [^\n]+, Device: " + device + r"\)$", services, re.M)
     if len(matches) != 1:
         raise RuntimeError("Cannot identify unique network service for " + device)
