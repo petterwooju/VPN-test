@@ -50,6 +50,25 @@ import CoreaSpeed
         precondition(NativeSpeedProbe.completedDownloadBytes(laneBytes * 4, lanes: 4) == laneBytes * 4)
         precondition(NativeSpeedProbe.completedDownloadBytes(laneBytes, lanes: 4) == nil)
         precondition(NativeSpeedProbe.completedDownloadBytes(laneBytes * 4 - 1, lanes: 4) == nil)
+        var raw = CSLane()
+        raw.limit = laneBytes
+        var payload = [CChar](repeating: 0, count: 1024)
+        precondition(csDiscard(&payload, 1, 1024, &raw) == 1024)
+        var partial = CSResult()
+        partial.receivedBytes = raw.received
+        let timeout = "body".withCString { stage in
+            "timeout".withCString { kind in
+                "Operation timed out".withCString { reason in
+                    partial.stage = stage
+                    partial.errorType = kind
+                    partial.errorReason = reason
+                    return NativeSpeedProbe.diagnostic(partial, expected: laneBytes, elapsed: 6.0)
+                }
+            }
+        }
+        precondition(partial.bytes == 0 && timeout.receivedBytes == 1024 && timeout.expectedBytes == laneBytes)
+        precondition(timeout.status == "failed" && timeout.stage == "body" && timeout.errorType == "timeout")
+        precondition(timeout.elapsedSeconds == 6 && timeout.error == "Operation timed out")
         // Exercise the transport parser and vanished-interface guard without sending traffic.
         precondition(csOpen("unavailable42", 0, "1.1.1.1", { _ in 0 }, nil) == nil)
         for (encoding, shouldReject) in [("identity", false), ("gzip", true), ("identity-other", true)] {

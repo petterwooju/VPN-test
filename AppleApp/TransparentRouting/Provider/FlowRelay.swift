@@ -21,21 +21,38 @@ struct FlowTarget: Hashable {
     }
 }
 
-private func processExecutable(_ flow: NEAppProxyFlow) -> String {
-    guard let token = flow.metaData.sourceAppAuditToken else { return "" }
-    var code: SecCode?, staticCode: SecStaticCode?, info: CFDictionary?
-    let attrs = [kSecGuestAttributeAudit: token as CFData] as CFDictionary
-    guard SecCodeCopyGuestWithAttributes(nil, attrs, [], &code) == errSecSuccess, let code,
-          SecCodeCopyStaticCode(code, [], &staticCode) == errSecSuccess, let staticCode,
-          SecCodeCopySigningInformation(staticCode, SecCSFlags(rawValue: kSecCSSigningInformation), &info) == errSecSuccess,
-          let fields = info as? [String: Any], let url = fields[kSecCodeInfoMainExecutable as String] as? URL else { return "" }
-    return url.path
+private struct SourceApplication {
+    let path: String
+    let name: String
+    let bundleID: String?
+
+    init(flow: NEAppProxyFlow) {
+        let fields = Self.signingInformation(token: flow.metaData.sourceAppAuditToken)
+        let plist = fields?[kSecCodeInfoPList as String] as? [String: Any]
+        let executable = fields?[kSecCodeInfoMainExecutable as String] as? URL
+        path = executable?.path ?? ""
+        bundleID = plist?["CFBundleIdentifier"] as? String
+        let labels = [plist?["CFBundleDisplayName"] as? String, plist?["CFBundleName"] as? String,
+                      executable?.lastPathComponent, flow.metaData.sourceAppSigningIdentifier]
+        name = labels.compactMap { $0 }.first { !$0.isEmpty } ?? "알 수 없는 앱"
+    }
+
+    private static func signingInformation(token: Data?) -> [String: Any]? {
+        guard let token else { return nil }
+        var code: SecCode?, staticCode: SecStaticCode?, info: CFDictionary?
+        let attrs = [kSecGuestAttributeAudit: token as CFData] as CFDictionary
+        guard SecCodeCopyGuestWithAttributes(nil, attrs, [], &code) == errSecSuccess, let code,
+              SecCodeCopyStaticCode(code, [], &staticCode) == errSecSuccess, let staticCode,
+              SecCodeCopySigningInformation(staticCode, SecCSFlags(rawValue: kSecCSSigningInformation), &info) == errSecSuccess else { return nil }
+        return info as? [String: Any]
+    }
 }
 
 /// One read at a time and one bounded write at a time. The NE flow provides
 /// backpressure for both TCP and framed UDP through the connected socketpair.
 private final class RouteChannel {
     let exit: FlowExit
+    let connection: ProviderLiveConnection
     private let queue: DispatchQueue
     private let fd: Int32
     private let source: DispatchSourceRead
@@ -45,10 +62,11 @@ private final class RouteChannel {
     private var eof = false
     private let incoming: (Data?, Error?, @escaping () -> Void) -> Void
 
-    init?(fd: Int32, exit: FlowExit, queue: DispatchQueue, onRead: @escaping (Data?, Error?, @escaping () -> Void) -> Void) {
+    init?(fd: Int32, exit: FlowExit, connection: ProviderLiveConnection, queue: DispatchQueue,
+          onRead: @escaping (Data?, Error?, @escaping () -> Void) -> Void) {
         let duplicate = dup(fd)
         guard duplicate >= 0 else { Darwin.close(fd); return nil }
-        self.exit = exit; self.queue = queue; self.fd = fd; self.incoming = onRead
+        self.exit = exit; self.connection = connection; self.queue = queue; self.fd = fd; self.incoming = onRead
         self.source = DispatchSource.makeReadSource(fileDescriptor: fd, queue: queue)
         self.output = DispatchIO(type: .stream, fileDescriptor: duplicate, queue: queue) { _ in Darwin.close(duplicate) }
         source.setEventHandler { [weak self] in self?.read() }
@@ -96,12 +114,13 @@ private final class RouteChannel {
 /// Calls occur on the provider's state queue. Each UDP peer gets its own
 /// rule decision, bound socket and originating endpoint for replies.
 final class FlowRelay {
+    let acceptedAt = ProcessInfo.processInfo.systemUptime
     private let flow: NEAppProxyFlow
     private let firstTarget: FlowTarget?
     private let session: RoutingSession
     private let queue: DispatchQueue
     private let workers: OperationQueue
-    private let path: String
+    private let application: SourceApplication
     private let done: () -> Void
     private var closed = false
     private var channels = [FlowTarget: RouteChannel]()
@@ -116,7 +135,7 @@ final class FlowRelay {
          queue: DispatchQueue, workers: OperationQueue, done: @escaping () -> Void) {
         self.flow = flow; self.firstTarget = initial; self.session = session
         self.queue = queue; self.workers = workers; self.done = done
-        self.path = processExecutable(flow)
+        self.application = SourceApplication(flow: flow)
     }
 
     func start() {
@@ -161,9 +180,9 @@ final class FlowRelay {
             if !udp || firstTarget == target { query.domain = flow.remoteHostname ?? "" }
         }
         query.transport = udp ? "UDP" : "TCP"; query.port = target.port
-        query.processPath = path; query.processName = (path as NSString).lastPathComponent
-        let exits = session.routes(query)
-        guard !exits.isEmpty else { then(nil); return }
+        query.processPath = application.path; query.processName = (application.path as NSString).lastPathComponent
+        guard let (rule, exits) = session.decision(for: query) else { then(nil); return }
+        let flowQuery = query
         connecting[target] = exits
         let op = BlockOperation()
         opening[target] = op
@@ -185,7 +204,9 @@ final class FlowRelay {
                 self.connecting.removeValue(forKey: target)
                 guard let (fd, exit) = result else { then(nil); return }
                 guard !self.session.physicalInvalidated, (!exit.isVPN || self.session.vpnLeaseValid), exit.binding.available else { Darwin.close(fd); then(nil); return }
-                let channel = RouteChannel(fd: fd, exit: exit, queue: queue) { [weak self] data, error, resume in
+                let connection = ProviderLiveConnection(app: self.application.name, bundleID: self.application.bundleID,
+                    query: flowQuery, rule: rule, exit: exit, server: self.session.server)
+                let channel = RouteChannel(fd: fd, exit: exit, connection: connection, queue: queue) { [weak self] data, error, resume in
                     self?.receive(data, error: error, target: target, endpoint: endpoint, resume: resume)
                 }
                 if let channel { self.channels[target] = channel }
@@ -285,6 +306,18 @@ final class FlowRelay {
     }
 
     var usesVPN: Bool { channels.values.contains { $0.exit.isVPN } || connecting.values.contains { $0.contains { $0.isVPN } } }
+
+    var liveConnectionCount: Int {
+        if closed || (flow is NEAppProxyTCPFlow && !tcpOpened) { return 0 }
+        return channels.count
+    }
+
+    func appendLiveConnections(to rows: inout [ProviderLiveConnection], limit: Int) {
+        guard liveConnectionCount > 0, rows.count < limit else { return }
+        for channel in channels.values.sorted(by: { $0.connection.startedAt > $1.connection.startedAt }).prefix(limit - rows.count) {
+            rows.append(channel.connection)
+        }
+    }
 
     func checkBinding(physical: Bool, vpn: Bool) {
         if !physical || (usesVPN && !vpn) { stop(); return }

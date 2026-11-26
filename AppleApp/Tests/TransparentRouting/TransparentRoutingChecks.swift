@@ -33,10 +33,13 @@ import Foundation
         ]
         var tick: TimeInterval = 50
         let session = try RoutingSession(config: config, queue: DispatchQueue(label: "checks"), uptime: { tick })
-        func paths(_ domain: String) -> [FlowExit] {
+        func query(_ domain: String) -> RouteQuery {
             var q = RouteQuery()
             q.domain = domain; q.ip = "203.0.113.80"; q.port = 443; q.transport = "TCP"
-            return session.routes(q)
+            return q
+        }
+        func paths(_ domain: String) -> [FlowExit] {
+            session.decision(for: query(domain))?.exits ?? []
         }
         precondition(paths("vpn.example").isEmpty)
         let tuple: [String: Any] = ["vpnInterface": "ipsec4", "vpnIndex": 19, "vpnIPv4": "10.4.5.6",
@@ -64,6 +67,32 @@ import Foundation
         precondition(paths("failover.example").isEmpty)
         session.recordHealth(leaf: "first", url: url, latency: 50)
         session.recordHealth(leaf: "second", url: url, latency: 40)
+        let failover = query("failover.example")
+        let decision = session.decision(for: failover)!
+        let opened = decision.exits[1] // First open failed, second socket opened.
+        let row = ProviderLiveConnection(app: "Example", bundleID: "test.app", query: failover,
+            rule: decision.rule, exit: opened, server: nil)
+        precondition(row.rule == "DOMAIN  failover.example" && row.group == "Failover" && row.node == "second")
+        precondition(row.egress == "proxy" && row.host == failover.domain && row.ip == failover.ip)
+        let snapshot = ProviderConnectionSnapshot(total: 1, connections: [row])
+        let reply = try JSONEncoder().encode(snapshot)
+        let dict = try JSONSerialization.jsonObject(with: reply) as! [String: Any]
+        let serialized = (dict["connections"] as! [[String: Any]])[0]
+        precondition(dict["version"] as? Int == 1 && serialized["interface"] as? String == "en999")
+        precondition(serialized["ruleID"] as? String == decision.rule.id.uuidString)
+        precondition(serialized["id"] as? String == row.id.uuidString && serialized["startedAt"] as? Double == row.startedAt)
+        precondition(!String(decoding: reply, as: UTF8.self).contains("fixture"))
+        var udp = query("direct.example")
+        udp.transport = "UDP"
+        let direct = session.decision(for: udp)!
+        let physical = ProviderLiveConnection(app: "Example", bundleID: nil, query: udp,
+            rule: direct.rule, exit: direct.exits[0], server: "puma.coreavpn.net")
+        precondition(physical.egress == "direct" && physical.transport == "UDP" && physical.server == nil)
+        session.updateVPN(tuple)
+        let vpn = session.decision(for: query("vpn.example"))!
+        let tunnel = ProviderLiveConnection(app: "Example", bundleID: nil, query: query("vpn.example"),
+            rule: vpn.rule, exit: vpn.exits[0], server: session.server)
+        precondition(tunnel.egress == "coreaVPN" && tunnel.server == "puma.coreavpn.net" && tunnel.interface == "ipsec4")
         precondition(paths("failover.example").compactMap(\.node) == ["first", "second"])
         precondition(paths("speed.example").first?.node == "second")
         session.recordHealth(leaf: "first", url: url, latency: 30)

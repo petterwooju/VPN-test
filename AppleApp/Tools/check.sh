@@ -29,7 +29,7 @@ python3 -B Tests/Benchmark/NativePilotChecks.py
 # A logged-in macOS session is needed for AppKit layout and accessibility cell geometry.
 if [[ "${COREAVPN_CHECK_APPKIT_LAYOUT:-0}" == 1 ]]; then
     compile comparison-layout -I NativeSpeed/include Benchmark/*.swift Networking/*.swift \
-        App/{Uplink,SessionModel,ServerComparisonTable,HistoryView,LocalTerminal}.swift \
+        App/{Uplink,SessionModel,MacServerDirectory,HistoryView,LocalTerminal}.swift \
         Tests/Benchmark/ComparisonLayoutChecks.swift
     "$cache/comparison-layout"
 fi

@@ -101,6 +101,7 @@ final class BenchmarkScanner {
         defer { disconnecting = false }
         _ = try await driver.snapshot()
         try await driver.restore(interrupted.selectionBaseline ?? interrupted.baseline)
+        if interrupted.mode == .direct { interrupted.phase = .cancelled; interrupted.finished = Date() }
         interrupted.selectionBaseline = nil
         interrupted.recoveryNeeded = false
         try store.save(interrupted)
@@ -114,6 +115,7 @@ final class BenchmarkScanner {
     private func execute(mode: ScanMode, network: BenchmarkNetwork, candidates: [CoreaServer],
                          resumeID: UUID?, paired: Bool, isNetworkCurrent: @escaping () -> Bool,
                          progress: @escaping (BenchmarkRun) -> Void) async throws -> BenchmarkRun {
+        guard mode != .direct else { throw BenchmarkError.invalidResume }
         let hosts = candidates.map(\.host)
         guard Set(hosts).count == hosts.count, Set(hosts).isSubset(of: Set(CoreaServer.catalog.map(\.host)))
         else { throw BenchmarkError.duplicate }
@@ -259,6 +261,7 @@ final class BenchmarkScanner {
                 try await driver.select(host: winner)
                 try check(isNetworkCurrent)
                 run.selectedHost = winner
+                run.selectedAt = Date()
             } else {
                 try await driver.restore(run.baseline)
                 try check(isNetworkCurrent)
@@ -275,6 +278,7 @@ final class BenchmarkScanner {
             let explicitStop = stop == .disconnect
             run.activeHost = nil
             run.selectedHost = nil
+            run.selectedAt = nil
             run.message = cause.localizedDescription
             // Cleanup includes polling and must run outside the already-cancelled task.
             do {
@@ -308,14 +312,20 @@ final class BenchmarkScanner {
         }
     }
 
-    func connectSelected(host: String, runID: UUID, network: BenchmarkNetwork,
+    func connectSelected(host: String, runID: UUID? = nil, network: BenchmarkNetwork,
                          isNetworkCurrent: @escaping () -> Bool) async throws -> BenchmarkRun {
         try await runExclusive {
-            guard var run = self.store.runs.first(where: { $0.id == runID }), run.network == network,
-                  run.paired == true, run.phase == .completed, run.order.contains(host),
-                  let index = run.rows.firstIndex(where: { $0.host == host }),
-                  !self.store.runs.contains(where: { $0.recoveryNeeded == true })
-            else { throw BenchmarkError.invalidResume }
+            guard CoreaServer.catalog.contains(where: { $0.host == host }),
+                  !self.store.runs.contains(where: { $0.recoveryNeeded == true }) else { throw BenchmarkError.invalidResume }
+            var comparison: BenchmarkRun?
+            var index = 0
+            if let runID {
+                guard let existing = self.store.runs.first(where: { $0.id == runID }), existing.network == network,
+                      existing.paired == true, existing.phase == .completed, existing.order.contains(host),
+                      let row = existing.rows.firstIndex(where: { $0.host == host }) else { throw BenchmarkError.invalidResume }
+                comparison = existing
+                index = row
+            }
             let baseline: ScanBaseline
             do {
                 try self.check(isNetworkCurrent)
@@ -323,28 +333,38 @@ final class BenchmarkScanner {
                 try self.check(isNetworkCurrent)
             } catch {
                 let reason = "\(host) 연결 준비 실패: " + error.localizedDescription
-                run.rows[index].selectionError = reason
-                run.message = reason
-                try self.store.save(run)
+                if var comparison {
+                    comparison.rows[index].selectionError = reason
+                    comparison.message = reason
+                    try self.store.save(comparison)
+                }
                 throw SelectionFailure(errorDescription: reason)
             }
+            var run = comparison ?? BenchmarkRun(id: UUID(), network: network, mode: .direct,
+                started: Date(), order: [host], baseline: baseline,
+                rows: [BenchmarkAttempt(host: host, time: Date(), outcome: .notRun, detail: "속도 검사 생략")])
             run.selectionBaseline = baseline
             run.recoveryNeeded = true
             run.message = nil
             run.rows[index].selectionError = nil
             try self.store.save(run)
             let previousSelection = run.selectedHost
+            let previousSelectionDate = run.selectedAt
             do {
                 try await self.driver.select(host: host)
                 try self.check(isNetworkCurrent)
+                if run.mode == .direct { run.phase = .completed; run.finished = Date() }
                 run.selectedHost = host
+                run.selectedAt = Date()
                 run.selectionBaseline = nil
                 run.recoveryNeeded = false
                 try self.store.save(run)
                 return run
             } catch {
                 let failure = error
+                if run.mode == .direct { run.phase = .failed; run.finished = Date() }
                 run.selectedHost = previousSelection
+                run.selectedAt = previousSelectionDate
                 run.message = "\(host) 연결 실패: " + failure.localizedDescription
                 run.rows[index].selectionError = run.message
                 do {

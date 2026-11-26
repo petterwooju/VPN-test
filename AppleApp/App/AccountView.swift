@@ -54,6 +54,7 @@ struct AccountView: View {
             }
             #if os(macOS)
             .formStyle(.grouped)
+            .controlSize(.large)
             #endif
             .navigationTitle("설정")
             .onAppear { if user.isEmpty { user = model.credentialName } }

@@ -54,6 +54,18 @@ final class BenchmarkStore: ObservableObject {
         BenchmarkRun.rankHTTPS(runs.filter { $0.network == network }.flatMap(\.rows))
     }
 
+    func latestServerConnection(deviceID: String) -> RecentServerConnection? {
+        runs.compactMap { run -> RecentServerConnection? in
+            guard run.network.deviceID == deviceID, run.recoveryNeeded != true,
+                  run.phase == .completed || run.phase == .retained,
+                  let host = run.selectedHost else { return nil }
+            let date = run.selectedAt ?? (run.phase == .retained ?
+                run.rows.first(where: { $0.host == host })?.time : run.finished) ?? run.started
+            let entry = RecentServerConnection(host: host, date: date)
+            return entry.server == nil ? nil : entry
+        }.max { $0.date < $1.date }
+    }
+
     // Supply .beijingReference unless the user has explicitly identified the original Mac/en6.
     // Rebinding from the reference to that installation is permitted once, never duplicates rows.
     func importBeijingBaseline(csv: String, into network: BenchmarkNetwork = .beijingReference) throws {
@@ -189,6 +201,7 @@ struct LocalProbeResult: Equatable {
         let server: String, target: String, tunnel: String, started: String, ended: String
         let peer_ipv4: String
         var speed: HTTPSBenchmarkSample
+        var download_lanes: [HTTPSDownloadLane]?
     }
 
     static func decodeHTTPS(_ data: Data, host: String) throws -> Self {
@@ -202,6 +215,7 @@ struct LocalProbeResult: Equatable {
               let start = date.date(from: result.started), let end = date.date(from: result.ended),
               start <= end else { throw LocalPumaImportError.invalid }
         result.speed.peerIPv4 = result.peer_ipv4
+        result.speed.downloadLanes = result.download_lanes ?? result.speed.downloadLanes
         return Self(httpsSample: result.speed, started: start, ended: end, tunnel: result.tunnel)
     }
 }

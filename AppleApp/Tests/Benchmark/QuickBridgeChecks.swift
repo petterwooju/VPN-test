@@ -66,6 +66,7 @@ import Foundation
         var store = try BenchmarkStore(fileURL: history)
         precondition(bridge.results.count == 1 && bridge.results[0].sample?.qualifies == true)
         precondition(bridge.retainedHost == host && !bridge.recoveryVerified)
+        precondition(bridge.lastConnection?.host == host)
         var added = try bridge.importCompleted(into: store)
         precondition(!added, "A result must not be assigned to a different physical interface")
         try json(["device": "en6"], "plan.json")
@@ -86,6 +87,7 @@ import Foundation
         held = false
         bridge.refresh()
         precondition(bridge.recoveryVerified && !bridge.running && !bridge.canRelease && bridge.retainedHost == nil)
+        precondition(LocalQuickSearch(workspace: runtime, defaults: defaults, pilotLockHeld: { false }).lastConnection?.host == host)
         added = try bridge.importCompleted(into: store)
         precondition(added && store.runs.count == 1 && store.runs.first?.id == id && store.runs.first?.phase == .completed)
         precondition(store.runs.first?.finished != nil && store.rankings(for: network).first?.runCount == 1)
@@ -120,6 +122,7 @@ import Foundation
         try json(ping, "ping-results.jsonl")
         bridge.refresh()
         precondition(bridge.activeHost == other && bridge.releaseButtonTitle == "검사 중지")
+        precondition(bridge.lastConnection?.host == host)
         bridge.release()
         bridge.release()
         let reopened = LocalQuickSearch(workspace: runtime, defaults: defaults, pilotLockHeld: { held })
@@ -169,6 +172,25 @@ import Foundation
         precondition(csv.contains(",\"HTTPS\",\"104.16.132.229\",\"20\",\"18\",\"10.0\","))
         precondition(!csv.contains("168.126.63.1"))
         precondition(csv.contains(String(32.0 / 130.5)) && csv.contains(String(6.4 / 20.5)))
+        var incompleteDownload = https
+        var incompleteStats = https["speed"] as! [String: Any]
+        for key in ["download_mbps", "download_bytes", "download_seconds"] {
+            incompleteStats.removeValue(forKey: key)
+        }
+        incompleteDownload["speed"] = incompleteStats
+        incompleteDownload["download_lanes"] = [["lane": 1,
+            "warmup": ["status": "complete", "stage": "complete", "received_bytes": 65536,
+                       "expected_bytes": 65536, "elapsed_seconds": 0.1],
+            "transfer": ["status": "failed", "stage": "body", "received_bytes": 1024,
+                         "expected_bytes": 4194304, "elapsed_seconds": 6.0, "error_type": "timeout",
+                         "error": "timed out", "error_class": "TimeoutError"]]]
+        let partialData = try JSONSerialization.data(withJSONObject: incompleteDownload)
+        let partialAttempt = try LocalMeasurement.https.decode(partialData, host: other)
+        let storedSample = try JSONDecoder().decode(HTTPSBenchmarkSample.self, from: JSONEncoder().encode(partialAttempt.httpsSample))
+        let partialLane = storedSample.downloadLanes?.first
+        precondition(partialLane?.lane == 1 && partialLane?.warmup.receivedBytes == 65536)
+        precondition(partialLane?.transfer?.receivedBytes == 1024 && partialLane?.transfer?.errorClass == "TimeoutError")
+        precondition(storedSample.downloadMbps == nil && storedSample.uploadMbps == 20.5)
         var failedUpload = https
         var idleFree = https["speed"] as! [String: Any]
         idleFree["upload_seconds"] = 2.0

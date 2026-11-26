@@ -201,18 +201,22 @@ final class RoutingSession {
         return children(group).flatMap { reachableLeaves($0, visited: visited.union([name])) }
     }
 
-    func routes(_ query: RouteQuery) -> [FlowExit] {
-        guard !physicalInvalidated else { return [] }
+    func decision(for query: RouteQuery) -> (rule: RoutingRule, exits: [FlowExit])? {
+        guard !physicalInvalidated else { return nil }
         var q = query
         q.geoMatch = geo?.classifier(address: q.ip)
         let preview = document.preview(q, supportsProcess: true)
-        guard let match = preview.match, preview.undecided.allSatisfy({ $0.policy == match.policy }) else { return [] }
+        guard let match = preview.match, preview.undecided.allSatisfy({ $0.policy == match.policy }) else { return nil }
+        let exits: [FlowExit]
         switch match.policy {
-        case .reject: return []
-        case .direct: return [FlowExit(binding: physical)].compactMap { $0 }
-        case .coreaVPN: guard vpnLeaseValid else { return [] }; return vpn.flatMap { FlowExit(binding: $0, vpn: true) }.map { [$0] } ?? []
-        case let .group(name): return routes(name, key: q.domain.isEmpty ? q.ip : q.domain, visited: [])
+        case .reject: return nil
+        case .direct: exits = [FlowExit(binding: physical)].compactMap { $0 }
+        case .coreaVPN:
+            guard vpnLeaseValid, let vpn, let exit = FlowExit(binding: vpn, vpn: true) else { return nil }
+            exits = [exit]
+        case let .group(name): exits = routes(name, key: q.domain.isEmpty ? q.ip : q.domain, visited: [])
         }
+        return exits.isEmpty ? nil : (match, exits)
     }
 
     private func routes(_ name: String, key: String, visited: Set<String>) -> [FlowExit] {

@@ -42,7 +42,7 @@ struct BenchmarkNetwork: Hashable, Codable {
 }
 
 enum ScanMode: String, Codable {
-    case quick, fastQuick, all, puma
+    case quick, fastQuick, all, puma, direct
 
     func candidates(configured: [CoreaServer]) -> [CoreaServer] {
         #if os(macOS)
@@ -101,6 +101,29 @@ struct PingSample: Codable, Equatable {
     }
 }
 
+struct HTTPSDownloadLane: Codable, Equatable {
+    struct Phase: Codable, Equatable {
+        let status: String
+        let stage: String
+        let receivedBytes: Int
+        let expectedBytes: Int
+        let elapsedSeconds: Double
+        var errorType: String?
+        var error: String?
+        var errorClass: String?
+
+        enum CodingKeys: String, CodingKey {
+            case status, stage, error
+            case receivedBytes = "received_bytes", expectedBytes = "expected_bytes"
+            case elapsedSeconds = "elapsed_seconds", errorType = "error_type", errorClass = "error_class"
+        }
+    }
+
+    let lane: Int
+    let warmup: Phase
+    var transfer: Phase?
+}
+
 struct HTTPSBenchmarkSample: Codable, Equatable {
     static let target = "speed.cloudflare.com"
     static let quickMinimumMbps = 50
@@ -118,6 +141,7 @@ struct HTTPSBenchmarkSample: Codable, Equatable {
     var downloadSeconds: Double? = nil
     var uploadSeconds: Double? = nil
     var peerIPv4: String? = nil
+    var downloadLanes: [HTTPSDownloadLane]? = nil
 
     enum CodingKeys: String, CodingKey {
         case sent, received
@@ -131,6 +155,7 @@ struct HTTPSBenchmarkSample: Codable, Equatable {
         case downloadSeconds = "download_seconds"
         case uploadSeconds = "upload_seconds"
         case peerIPv4 = "peer_ipv4"
+        case downloadLanes = "download_lanes"
     }
 
     var valid: Bool {
@@ -167,6 +192,7 @@ struct HTTPSBenchmarkSample: Codable, Equatable {
         var updated = self
         updated.downloadSeconds = downloadSeconds ?? source?.downloadSeconds
         updated.uploadSeconds = uploadSeconds ?? source?.uploadSeconds
+        updated.downloadLanes = downloadLanes ?? source?.downloadLanes
         return updated
     }
 }
@@ -224,6 +250,13 @@ struct HTTPSServerRank: Identifiable {
     var idleLatencyMS: Double? { received > 0 ? weightedLatency / Double(received) : nil }
 }
 
+struct RecentServerConnection: Codable, Equatable {
+    let host: String
+    let date: Date
+
+    var server: CoreaServer? { CoreaServer.catalog.first { $0.host == host } }
+}
+
 struct BenchmarkRun: Codable, Identifiable {
     let id: UUID
     let network: BenchmarkNetwork
@@ -235,6 +268,7 @@ struct BenchmarkRun: Codable, Identifiable {
     var phase: ScanPhase = .scanning
     var activeHost: String? = nil
     var selectedHost: String? = nil
+    var selectedAt: Date? = nil
     var message: String? = nil
     var finished: Date? = nil
     var recoveryNeeded: Bool? = nil

@@ -8,22 +8,14 @@ Xcode 26에서 iPhone을 처음 페어링할 때는 데이터 전송용 케이�
 
 앱의 **설정**에서 계정과 암호를 Keychain에 저장하고 **VPN 구성 최초 승인**을 누릅니다. 현재 회선에 이름을 붙이고 계정이 사용할 수 있는 그룹을 선택합니다. iPhone 전용 인증 설정이 필요한 서버는 공급자가 해당 계정으로 발급한 IKEv2 구성 파일을 가져옵니다. 서명된 CMS 파일이나 지원하지 않는 인증 조건은 가져오기 화면에 이유가 표시됩니다. [CoreaVPN 서버표](https://coreavpn.net/docs/servers.htm)
 
-개발자 서명 없이 Mac에서 화면과 기록을 확인할 수 있습니다. 기존 Puma 검사 도구를 설정한 Mac에서는 미리보기 앱에서 실제 Puma 연결과 측정도 시작할 수 있습니다. 저장소 루트에서 아래 명령을 실행하면 현재 사용자의 아키텍처에 맞는 앱이 출력됩니다.
+Mac 미리보기 앱을 종료하고 저장소 루트에서 다음 명령으로 설치하거나 업데이트합니다.
 
 ```sh
-AppleApp/Tools/build-preview-mac.sh ../build
-```
-
-`CoreaVPN_TEST`와 FlClash를 설정한 Mac에서는 미리보기 앱을 종료하고 다음 명령으로 검사 도구를 설치합니다. `--migrate-from ..`은 이전 작업공간에서 이 앱의 최근 검사 기록을 가져옵니다.
-
-```sh
-python3 -B AppleApp/Tools/install-preview-runtime.py ../build --migrate-from ..
-mkdir -p "$HOME/Applications"
-ditto ../build/CoreaVPN.app "$HOME/Applications/CoreaVPN.app"
+python3 -B AppleApp/Tools/update-preview-mac.py
 open "$HOME/Applications/CoreaVPN.app"
 ```
 
-앱과 Terminal은 설치 후 `~/Library/Application Support/CoreaVPN/LocalRuntime`에서 도구를 실행하고 그 안의 `runs`에 새 기록을 저장합니다. 다음 빌드도 같은 경로에 설치합니다.
+설치 도구는 임시 폴더에서 빌드와 서명 검사를 마친 뒤 `~/Applications/CoreaVPN.app`을 교체합니다. 측정 기록과 최근 서버, 사용자 규칙은 Application Support에 보관합니다. 기존 설치의 FlClash 보정값을 재사용합니다. 새 Mac에서 로컬 검사 도구를 설치할 때는 해당 Mac에서 검증한 보정 파일의 절대 경로를 `COREAVPN_QUICK_MAP`으로 지정합니다.
 
 ## Apple Silicon Mac용 서명 및 공증
 

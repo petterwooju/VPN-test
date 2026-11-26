@@ -44,6 +44,7 @@ enum NativeSpeedProbe {
         let mbps: Double?
         let loadedMS: Double?
         let seconds: Double?
+        var diagnostics: [HTTPSDownloadLane]? = nil
     }
     private static func mean(_ values: [Double]) -> Double? {
         values.isEmpty ? nil : values.reduce(0, +) / Double(values.count)
@@ -55,22 +56,45 @@ enum NativeSpeedProbe {
         lanes > 0 && total == lanes * downloadSize ? total : nil
     }
 
+    static func diagnostic(_ result: CSResult, expected: Int, elapsed: Double) -> HTTPSDownloadLane.Phase {
+        var reason = result.errorReason.map { String(cString: $0) }
+        let category = result.errorType.map { String(cString: $0) }
+        if category == "http_status", result.httpStatus > 0 { reason = "HTTP \(result.httpStatus)" }
+        return HTTPSDownloadLane.Phase(status: result.success == 1 ? "complete" : "failed",
+            stage: result.stage.map { String(cString: $0) } ?? "request", receivedBytes: result.receivedBytes,
+            expectedBytes: expected, elapsedSeconds: elapsed, errorType: category, error: reason)
+    }
+
     private static func phase(interface: String, index: UInt32, peer: String, upload: Bool, idle: Lane) async throws -> Transfer {
-        let lanes = await withTaskGroup(of: Lane?.self) { group in
-            for _ in 0..<4 {
+        let warmBytes = 65_536
+        let warmups = await withTaskGroup(of: (Lane?, HTTPSDownloadLane).self) { group in
+            for number in 1...4 {
                 group.addTask {
-                    try? await background {
-                        let lane = try Lane(interface, index, peer)
-                        return lane.request(size: 65_536, timeout: 2000).success == 1 ? lane : nil
+                    let began = now
+                    do {
+                        return try await background {
+                            let lane = try Lane(interface, index, peer)
+                            let result = lane.request(size: warmBytes, timeout: 2000)
+                            let report = diagnostic(result, expected: warmBytes, elapsed: now - began)
+                            return (result.success == 1 ? lane : nil, HTTPSDownloadLane(lane: number, warmup: report))
+                        }
+                    } catch {
+                        let report = HTTPSDownloadLane.Phase(status: "failed", stage: "setup", receivedBytes: 0,
+                            expectedBytes: warmBytes, elapsedSeconds: now - began, errorType: "setup", error: error.localizedDescription)
+                        return (nil, HTTPSDownloadLane(lane: number, warmup: report))
                     }
                 }
             }
-            var warmed: [Lane] = []
-            for await lane in group { if let lane { warmed.append(lane) } }
-            return warmed
+            var entries: [(Lane?, HTTPSDownloadLane)] = []
+            for await entry in group { entries.append(entry) }
+            return entries.sorted { $0.1.lane < $1.1.lane }
         }
         try Task.checkCancellation()
-        guard !lanes.isEmpty else { return Transfer(bytes: 0, mbps: nil, loadedMS: nil, seconds: nil) }
+        let lanes = warmups.compactMap { lane, report in lane.map { (report.lane, $0) } }
+        var diagnostics = warmups.map(\.1)
+        guard !lanes.isEmpty else {
+            return Transfer(bytes: 0, mbps: nil, loadedMS: nil, seconds: nil, diagnostics: upload ? nil : diagnostics)
+        }
 
         // Four 256 KiB requests per upload lane; only server-acknowledged requests count.
         var payload: Data?
@@ -90,11 +114,12 @@ enum NativeSpeedProbe {
             }
             return samples
         }
+        defer { loaded.cancel() }
         var bytes = 0, lastCompletion = start
-        await withTaskGroup(of: (Int, Double).self) { group in
-            for lane in lanes {
+        try await withThrowingTaskGroup(of: (Int, Double, Int, HTTPSDownloadLane.Phase?).self) { group in
+            for (number, lane) in lanes {
                 group.addTask {
-                    let count = (try? await background { () -> Int in
+                    try await background {
                         if let uploadBody {
                             var count = 0
                             for _ in 0..<4 {
@@ -104,15 +129,18 @@ enum NativeSpeedProbe {
                                 guard result.success == 1 else { break }
                                 count += result.bytes
                             }
-                            return count
+                            return (count, now, number, nil)
                         }
                         let left = Int((start + 6 - now) * 1000)
-                        return lane.request(size: downloadSize, timeout: left).bytes
-                    }) ?? 0
-                    return (count, now)
+                        let began = now
+                        let result = lane.request(size: downloadSize, timeout: left)
+                        let end = now
+                        return (result.bytes, end, number, diagnostic(result, expected: downloadSize, elapsed: end - began))
+                    }
                 }
             }
-            for await (count, end) in group {
+            for try await (count, end, number, report) in group {
+                diagnostics[number - 1].transfer = report
                 bytes += count
                 lastCompletion = max(lastCompletion, end)
             }
@@ -123,10 +151,10 @@ enum NativeSpeedProbe {
         let duration = lastCompletion - start
         let completed = upload ? bytes : completedDownloadBytes(bytes, lanes: lanes.count)
         guard let completed, completed > 0, duration > 0 else {
-            return Transfer(bytes: completed, mbps: nil, loadedMS: mean(measuredLatencies), seconds: nil)
+            return Transfer(bytes: completed, mbps: nil, loadedMS: mean(measuredLatencies), seconds: nil, diagnostics: upload ? nil : diagnostics)
         }
         return Transfer(bytes: completed, mbps: Double(completed) * 8 / duration / 1_000_000,
-                        loadedMS: mean(measuredLatencies), seconds: duration)
+                        loadedMS: mean(measuredLatencies), seconds: duration, diagnostics: upload ? nil : diagnostics)
     }
 
     @MainActor static func measure(interface: String, validate: @escaping (String) throws -> Void,
@@ -165,13 +193,13 @@ enum NativeSpeedProbe {
             HTTPSBenchmarkSample(sent: idleResult.sent, received: idleResult.values.count, averageMS: mean(idleResult.values),
                  downloadMbps: download?.mbps, uploadMbps: upload?.mbps, downloadLoadedMS: download?.loadedMS,
                  uploadLoadedMS: upload?.loadedMS, downloadBytes: download?.bytes, uploadBytes: upload?.bytes,
-                 downloadSeconds: download?.seconds, uploadSeconds: upload?.seconds, peerIPv4: peer)
+                 downloadSeconds: download?.seconds, uploadSeconds: upload?.seconds, peerIPv4: peer, downloadLanes: download?.diagnostics)
         }
         try verify()
         if idleResult.sent > 0 { try checkpoint(sample(nil, nil)) }
         let download = try await phase(interface: interface, index: index, peer: peer, upload: false, idle: idle)
         try verify()
-        if idleResult.sent > 0 || download.mbps != nil { try checkpoint(sample(download, nil)) }
+        try checkpoint(sample(download, nil))
         let upload = try await phase(interface: interface, index: index, peer: peer, upload: true, idle: idle)
         try verify()
         return sample(download, upload)

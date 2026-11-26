@@ -28,7 +28,7 @@ exec "$base/current/Run-Puma.command" "$@"
 LOCK = Path("/private/tmp") / f"coreavpn-offline-{os.getuid()}.lock"
 
 
-def install(staged, runtime, legacy=None):
+def install(staged, runtime, legacy=None, publish=None):
     source = staged / "LocalRuntime"
     runtime.mkdir(mode=0o700, parents=True, exist_ok=True)
     if runtime.is_symlink():
@@ -87,7 +87,18 @@ def install(staged, runtime, legacy=None):
                 entry.replace(launcher)
             selection = scratch / "current"
             selection.symlink_to(release)
+            previous = os.readlink(current) if current.is_symlink() else None
             selection.replace(current)
+            if publish is not None:
+                try:
+                    publish()
+                except BaseException:
+                    if previous is None:
+                        current.unlink()
+                    else:
+                        selection.symlink_to(previous)
+                        selection.replace(current)
+                    raise
 
 
 def main():

@@ -31,7 +31,7 @@ cat > "$bundle/Info.plist" <<'PLIST'
 PLIST
 workspace=$(dirname "$root")
 runtime="$HOME/Library/Application Support/CoreaVPN/LocalRuntime"
-map="${COREAVPN_QUICK_MAP:-$workspace/runs/20261122-101932-puma/fl-map-venus.json}"
+map="${COREAVPN_QUICK_MAP:-$runtime/build/fl-map.json}"
 # CI and fresh checkouts can still build the native interface without this Mac's calibration.
 if [[ -f "$map" ]]; then
     stage="$out/LocalRuntime"

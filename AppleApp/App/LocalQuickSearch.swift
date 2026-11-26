@@ -59,8 +59,16 @@ final class LocalQuickSearch: ObservableObject {
     private struct Recovery: Decodable { let ok: Bool; let errors: [String] }
     private struct Server: Decodable { let server: String }
 
+    struct ComparisonProgress: Equatable {
+        let finished: Int
+        let total: Int
+        let host: String?
+        let stage: String
+    }
+
     @Published private(set) var running = false
     @Published private(set) var retainedHost: String?
+    @Published private(set) var lastConnection: RecentServerConnection?
     @Published private(set) var activeHost: String?
     @Published private(set) var status = ""
     @Published private(set) var latestDirectory: URL?
@@ -72,16 +80,19 @@ final class LocalQuickSearch: ObservableObject {
     @Published private(set) var comparisonRows: [BenchmarkAttempt] = []
     @Published private(set) var comparisonReady = false
     @Published private(set) var selectionFailure: String?
+    @Published private(set) var comparisonProgress: ComparisonProgress?
     private let comparisonKey = "localFullComparisonRequest.v1"
     private var comparison: Request?
     var comparisonNetwork: BenchmarkNetwork? { comparison?.network }
     var comparisonID: UUID? { comparison?.id }
+    var comparisonHostCount: Int { comparison?.hosts.count ?? 0 }
     var showingQuick: Bool { request?.kind == .quick }
-    var failedSelectionHost: String? { selectionFailure != nil ? request?.hosts.first : nil }
+    var failedSelectionHost: String? { selectionFailure != nil && request?.comparisonID == comparison?.id && request?.comparisonID != nil ? request?.hosts.first : nil }
 
     private let fm = FileManager.default
     private let defaults: UserDefaults
     private let requestKey = "localQuickSearchRequest.v1"
+    private let lastConnectionKey = "lastVerifiedCoreaServerConnection.v1"
     private var request: Request?
     private var retryNeeded = false
     private var stoppedDuringSearch = false
@@ -130,6 +141,11 @@ final class LocalQuickSearch: ObservableObject {
         self.defaults = defaults
         if let data = defaults.data(forKey: requestKey) {
             request = try? JSONDecoder().decode(Request.self, from: data)
+        }
+        if let data = defaults.data(forKey: lastConnectionKey),
+           let saved = try? JSONDecoder().decode(RecentServerConnection.self, from: data),
+           saved.server != nil {
+            lastConnection = saved
         }
         if let data = defaults.data(forKey: comparisonKey) {
             comparison = try? JSONDecoder().decode(Request.self, from: data)
@@ -281,6 +297,11 @@ final class LocalQuickSearch: ObservableObject {
     @discardableResult
     func startAll(network: BenchmarkNetwork) -> Bool {
         begin(.all, hosts: CoreaServer.catalog.map(\.host), network: network)
+    }
+
+    @discardableResult
+    func connectDirect(_ server: CoreaServer, network: BenchmarkNetwork) -> Bool {
+        begin(.select, hosts: [server.host], network: network)
     }
 
     @discardableResult
@@ -452,7 +473,21 @@ final class LocalQuickSearch: ObservableObject {
             verifiedQuickWinner(request: request, directory: run)
 
         retainedHost = phase == "retained" && protected && !stoppedDuringSearch && selected == state?.host ? selected : nil
+        if let selected, selected == state?.host, !stoppedDuringSearch,
+           retainedHost == selected || (phase == "released" && recoveryVerified) {
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            let connectedAt = events.last(where: { $0.stage == "server-connected" && $0.server == selected })?
+                .time.flatMap(formatter.date(from:)) ?? request.started
+            let connection = RecentServerConnection(host: selected, date: connectedAt)
+            if connection.server != nil, connectedAt > (lastConnection?.date ?? .distantPast),
+               let data = try? JSONEncoder().encode(connection) {
+                lastConnection = connection
+                defaults.set(data, forKey: lastConnectionKey)
+            }
+        }
         activeHost = phase == "searching" ? (state?.host ?? events.last { $0.stage == "server-start" }?.server) : retainedHost
+        comparisonProgress = running && request.kind == .all ? Self.comparisonProgress(request, host: activeHost, events: events) : nil
         switch phase {
         case _ where requested && running && !terminal && phase != "recovering":
             status = stoppedDuringSearch ? "검사 중지를 요청했습니다." : "연결 해제를 요청했습니다."
@@ -460,10 +495,10 @@ final class LocalQuickSearch: ObservableObject {
         case "searching" where running && request.kind == .select:
             status = "\(request.hosts.first ?? "")에 연결하고 있습니다."
         case "searching" where running && request.kind == .all:
-            let completedHosts = Set(events.filter { $0.stage == "server-finished" || $0.stage == "server-failed" }.compactMap(\.server))
-            let step = events.last(where: { $0.server == activeHost && $0.stage == "probe-start" })?.step
-            status = "전체 검사 \(completedHosts.count)/\(request.hosts.count) · \(activeHost ?? "준비") · " +
-                (step == "https" ? "FAST" : step == "icmp" ? "ping" : "연결")
+            if let progress = comparisonProgress {
+                status = "전체 검사 \(progress.finished)/\(progress.total) · " +
+                    [progress.host, progress.stage].compactMap { $0 }.joined(separator: " · ")
+            }
         case "searching" where running:
             status = activeHost.map { "\($0) 연결 · \(lastMeasurement?.title ?? "속도") 측정 중" }
                 ?? "후보 서버를 검사하고 있습니다."
@@ -484,6 +519,24 @@ final class LocalQuickSearch: ObservableObject {
         }
         if retryNeeded { status += " · FlClash 복구 재시도 필요" }
         if running { poll() }
+    }
+
+    private static func comparisonProgress(_ request: Request, host: String?, events: [Event]) -> ComparisonProgress {
+        let candidates = Set(request.hosts)
+        let finished = Set(events.compactMap { event in
+            ["server-finished", "server-failed"].contains(event.stage) ? event.server : nil
+        }).intersection(candidates)
+        let latest = host.flatMap { active in events.last { $0.server == active } }
+        let stage: String
+        switch latest?.stage {
+        case "probe-start" where latest?.step == "icmp": stage = "ping 측정 중"
+        case "probe-start" where latest?.step == "https": stage = "FAST 평상시 지연 측정 중"
+        case "https-idle-complete": stage = "FAST 다운로드 측정 중"
+        case "https-download-complete": stage = "FAST 업로드 측정 중"
+        case "https-complete", "probe-failed", "server-finished", "server-failed": stage = "결과 처리 중"
+        default: stage = host == nil ? "검사 준비 중" : "서버 연결 중"
+        }
+        return ComparisonProgress(finished: finished.count, total: request.hosts.count, host: host, stage: stage)
     }
 
     private func lines(_ name: String, in directory: URL) -> [Data] {
@@ -714,9 +767,12 @@ final class LocalQuickSearch: ObservableObject {
                 record.rows[row].selectionError = error
             } else {
                 guard selectedConnection(in: run, request: request, host: host) == host,
-                      retainedHost == host || recoveryVerified,
-                      record.selectedHost != host || record.rows[row].selectionError != nil else { return false }
+                      retainedHost == host || recoveryVerified else { return false }
+                let selectedAt = lastConnection.flatMap { $0.host == host ? $0.date : nil } ?? request.started
+                guard record.selectedHost != host || record.selectedAt != selectedAt ||
+                        record.rows[row].selectionError != nil else { return false }
                 record.selectedHost = host
+                record.selectedAt = selectedAt
                 record.rows[row].selectionError = nil
             }
             try store.save(record)
@@ -742,6 +798,7 @@ final class LocalQuickSearch: ObservableObject {
                 }
                 if existing.phase == record.phase && existing.rows == record.rows { return false }
                 record.selectedHost = existing.selectedHost
+                record.selectedAt = existing.selectedAt
             }
             try store.save(record)
             return true
@@ -757,6 +814,9 @@ final class LocalQuickSearch: ObservableObject {
                                   baseline: ScanBaseline(host: nil, connected: false, onDemand: false))
         record.rows = results
         if !stoppedDuringSearch { record.selectedHost = verifiedQuickWinner(request: request, directory: run) }
+        if let lastConnection, record.selectedHost == lastConnection.host, lastConnection.date >= request.started {
+            record.selectedAt = lastConnection.date
+        }
         if isHeld {
             // Retention requires both the live supervisor and its verified tunnel sample.
             guard record.selectedHost == retainedHost, existing?.finished == nil else { return false }

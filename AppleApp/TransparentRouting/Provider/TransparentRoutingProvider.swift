@@ -91,6 +91,18 @@ final class TransparentRoutingProvider: NETransparentProxyProvider {
 
     override func handleAppMessage(_ messageData: Data, completionHandler: ((Data?) -> Void)? = nil) {
         state.async {
+            if messageData == ProviderConnectionSnapshot.request {
+                guard self.session != nil else { completionHandler?(nil); return }
+                let total = self.flows.values.reduce(0) { $0 + $1.liveConnectionCount }
+                var rows: [ProviderLiveConnection] = []
+                for relay in self.flows.values.sorted(by: { $0.acceptedAt > $1.acceptedAt }) {
+                    if rows.count == ProviderConnectionSnapshot.limit { break }
+                    relay.appendLiveConnections(to: &rows, limit: ProviderConnectionSnapshot.limit)
+                }
+                let snapshot = ProviderConnectionSnapshot(total: total, connections: rows)
+                completionHandler?(try? JSONEncoder().encode(snapshot))
+                return
+            }
             guard let session = self.session, messageData.count <= 4 * 1024 * 1024,
                   let message = (try? PropertyListSerialization.propertyList(from: messageData, format: nil)) as? [String: Any] else {
                 completionHandler?(nil); return

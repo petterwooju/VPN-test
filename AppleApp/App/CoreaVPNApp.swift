@@ -28,7 +28,7 @@ struct CoreaApplication: App {
     var body: some Scene {
         #if os(macOS)
         Window("CoreaVPN", id: "main") { LaunchView() }
-            .defaultSize(width: 870, height: 720)
+            .defaultSize(width: 1100, height: 740)
         #else
         WindowGroup { LaunchView() }
         #endif
@@ -57,14 +57,12 @@ struct ClientTabs: View {
     #endif
     @Environment(\.scenePhase) var phase
     var body: some View {
-        TabView {
-            ConnectionView(model: model).tabItem { Label("연결", systemImage: "network") }
-            HistoryView(store: model.store, model: model).tabItem { Label("측정 기록", systemImage: "chart.bar.xaxis") }
-            RulesView().tabItem { Label("규칙", systemImage: "arrow.triangle.branch") }
-            #if ROUTE_LAB
-            ScopedExperiment(model: model).tabItem { Label("터널 실험", systemImage: "point.3.connected.trianglepath.dotted") }
+        Group {
+            #if os(macOS)
+            MacDashboardShell(model: model)
+            #else
+            mobileTabs
             #endif
-            AccountView(model: model).tabItem { Label("설정", systemImage: "gearshape") }
         }
         #if os(macOS) && DIRECT_ROUTING
         .environmentObject(model)
@@ -99,18 +97,30 @@ struct ClientTabs: View {
             #endif
         }
         #if os(macOS)
-        .frame(minWidth: 580, minHeight: 460)
+        .frame(minWidth: 790, minHeight: 500)
         #endif
     }
+
+    #if !os(macOS)
+    private var mobileTabs: some View {
+        TabView {
+            ConnectionView(model: model).tabItem { Label("연결", systemImage: "network") }
+            HistoryView(store: model.store, model: model).tabItem { Label("측정 기록", systemImage: "chart.bar.xaxis") }
+            RulesView().tabItem { Label("규칙", systemImage: "arrow.triangle.branch") }
+            #if ROUTE_LAB
+            ScopedExperiment(model: model).tabItem { Label("터널 실험", systemImage: "point.3.connected.trianglepath.dotted") }
+            #endif
+            AccountView(model: model).tabItem { Label("설정", systemImage: "gearshape") }
+        }
+    }
+    #endif
 }
 
+#if !os(macOS)
 struct ConnectionView: View {
     @ObservedObject var model: SessionModel
     @ObservedObject private var store: BenchmarkStore
-    #if os(macOS)
-    @StateObject private var quick = LocalQuickSearch()
-    @StateObject private var pilot = LocalPilot()
-    #endif
+
     init(model: SessionModel) { self.model = model; store = model.store }
 
     var body: some View {
@@ -124,47 +134,13 @@ struct ConnectionView: View {
                     }
                     if !model.message.isEmpty { Text(model.message).foregroundStyle(.secondary).textSelection(.enabled) }
                 }
-                #if os(macOS)
-                if model.previewBuild {
-                    LocalQuickSection(model: model, quick: quick, pilot: pilot)
-                } else if !NSRunningApplication.runningApplications(withBundleIdentifier: "com.follow.clash").isEmpty,
-                          let guardian = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "net.petterwooju.coreavpn.preview") {
-                    Section("FlClash 사용 중") {
-                        Button("FlClash 자동 복구가 있는 검사 앱 열기") {
-                            NSWorkspace.shared.openApplication(at: guardian, configuration: .init()) { _, error in
-                                if let error { Task { @MainActor in model.message = error.localizedDescription } }
-                            }
-                        }.disabled(model.busy)
-                        Text("이 Mac에서 FlClash를 잠시 끄고 검사하려면 로컬 복구 감시를 사용하는 검사 앱을 여세요.")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-                #endif
                 Section("서버 연결") {
                     action(model.relayEnabled ? ".net 중계 켜짐 · 주소 갱신" : ".net 주소 중계 켜기", "point.3.connected.trianglepath.dotted") { model.warmResolver() }
-                    if !usesLocalSearch {
-                        action("168.126.63.1 100ms 이하 서버 연결", "bolt.horizontal", needsVPN: true) { Task { await model.start(.quick) } }
-                        #if os(macOS)
-                        action(HTTPSBenchmarkSample.quickConnectionTitle, "arrow.down.circle", needsVPN: true) { Task { await model.start(.fastQuick) } }
-                        action("전체 테스트 후 서버 선택", "list.number", needsVPN: true) { Task { await model.start(.all) } }
-                        #else
-                        action("전체 테스트 후 최적 서버 연결", "list.number", needsVPN: true) { Task { await model.start(.all) } }
-                        #endif
-                    }
-                    if !usesLocalSearch { Button(role: .destructive) { Task { await model.disconnect() } } label: { Label("CoreaVPN 해제", systemImage: "stop.circle") }
+                    action("168.126.63.1 100ms 이하 서버 연결", "bolt.horizontal", needsVPN: true) { Task { await model.start(.quick) } }
+                    action("전체 테스트 후 최적 서버 연결", "list.number", needsVPN: true) { Task { await model.start(.all) } }
+                    Button(role: .destructive) { Task { await model.disconnect() } } label: { Label("CoreaVPN 해제", systemImage: "stop.circle") }
                         .disabled(model.previewBuild || model.shuttingDown || model.stoppingScan || model.work == "permission")
-                    }
                 }
-                #if os(macOS)
-                if !model.previewBuild, let run = store.runs.last(where: { $0.paired == true && $0.network == model.network }) {
-                    Section("서버 비교") {
-                        ServerComparisonTable(rows: run.rows, selectedHost: run.selectedHost,
-                                              selectionEnabled: run.phase == .completed && run.recoveryNeeded != true && !model.busy,
-                                              onConnect: { host in Task { await model.connectSelected(host: host, in: run) } })
-                    }
-                }
-                if model.previewBuild { LocalPilotSection(model: model, pilot: pilot).disabled(quick.running || quick.canRelease) }
-                #endif
                 if store.runs.contains(where: { $0.recoveryNeeded == true }) {
                     Button("중단 당시 연결 상태 복구") { Task { await model.recover() } }.disabled(model.busy)
                 }
@@ -195,11 +171,7 @@ struct ConnectionView: View {
                                 Spacer()
                                 Text(server.group).foregroundStyle(.secondary)
                             }
-                            #if os(macOS)
-                            let exclusion = model.exclusion(server).map { "빠른 연결 제외 · " + $0 }
-                            #else
                             let exclusion = model.exclusion(server)
-                            #endif
                             if let status = exclusion ?? model.dnsErrors[server.host] ?? model.addresses[server.host] {
                                 Text(status).font(.caption).foregroundStyle(.secondary)
                             }
@@ -209,21 +181,12 @@ struct ConnectionView: View {
             }.navigationTitle("CoreaVPN")
         }
     }
-    private var usesLocalSearch: Bool {
-        #if os(macOS)
-        model.previewBuild
-        #else
-        false
-        #endif
-    }
     private var displayHost: String? {
-        #if os(macOS)
-        quick.retainedHost ?? model.connectedHost
-        #else
         model.connectedHost
-        #endif
     }
     private func action(_ title: String, _ icon: String, needsVPN: Bool = false, go: @escaping () -> Void) -> some View {
         Button(action: go) { Label(title, systemImage: icon) }.disabled(model.busy || !model.link.available || (needsVPN && model.previewBuild))
     }
 }
+
+#endif

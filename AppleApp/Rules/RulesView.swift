@@ -24,6 +24,15 @@ private struct RuleEditorRequest: Identifiable {
 }
 
 struct RulesView: View {
+    #if os(macOS)
+    private let focusedRuleID: UUID?
+    @State private var activeRuleID: UUID?
+
+    init(focusedRuleID: UUID? = nil) {
+        self.focusedRuleID = focusedRuleID
+        _activeRuleID = State(initialValue: focusedRuleID)
+    }
+    #endif
     @State private var document = RoutingDocument()
     @State private var hasLoaded = false
     @State private var loadFailed = false
@@ -41,7 +50,7 @@ struct RulesView: View {
     @State private var confirmDeletion: RoutingRule?
     @State private var busy = false
 
-    private static var storage: URL {
+    static var storage: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("CoreaVPN", isDirectory: true).appendingPathComponent("routing-v1.json")
     }
@@ -49,9 +58,15 @@ struct RulesView: View {
     var body: some View {
         let names = document.knownTargets
         let rows = document.rules.enumerated().compactMap { index, rule -> RuleRow? in
+            #if os(macOS)
+            if let activeRuleID, rule.id != activeRuleID { return nil }
+            #endif
             let issue = rule.issue(groups: names, supportsProcess: RoutingDocument.supportsProcess)
-            guard !onlyIssues || issue != nil,
-                  filter.isEmpty || rule.displayText.localizedCaseInsensitiveContains(filter) || rule.policy.title.localizedCaseInsensitiveContains(filter) else { return nil }
+            if !showsTrackedRule {
+                guard !onlyIssues || issue != nil,
+                      filter.isEmpty || rule.displayText.localizedCaseInsensitiveContains(filter) ||
+                        rule.policy.title.localizedCaseInsensitiveContains(filter) else { return nil }
+            }
             return RuleRow(position: index + 1, rule: rule, issue: issue)
         }
         VStack(alignment: .leading, spacing: 10) {
@@ -80,20 +95,24 @@ struct RulesView: View {
             Text("규칙 편집 및 경로 미리보기 · 실제 트래픽 분리 미적용")
                 .font(.subheadline).foregroundStyle(.secondary)
             #endif
-            HStack {
-                TextField("도메인, 조건 또는 정책 검색", text: $filter).textFieldStyle(.roundedBorder)
-                Button { onlyIssues.toggle() } label: {
-                    Image(systemName: onlyIssues ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
-                }.accessibilityLabel("확인할 규칙만 보기")
-                Button {
-                    let position = (document.rules.firstIndex(where: { $0.kind == "MATCH" }) ?? document.rules.count) + 1
-                    editor = RuleEditorRequest(rule: RoutingRule(kind: "DOMAIN", value: "", policy: .direct), isNew: true, priority: position)
-                } label: { Image(systemName: "plus") }.accessibilityLabel("규칙 추가").disabled(loadFailed)
+            #if os(macOS)
+            if showsTrackedRule {
+                HStack {
+                    Label("실시간 연결에서 선택한 규칙", systemImage: "link")
+                    Spacer()
+                    Button("전체 규칙 보기") { activeRuleID = nil }
+                }.accessibilityIdentifier("tracked-routing-rule")
+            } else {
+                searchBar(resultCount: rows.count)
             }
-            Text("규칙 \(document.rules.count)개 · 프록시 그룹 \(document.groups.count)개 · 검색 결과 \(rows.count)개")
-                .font(.caption).foregroundStyle(.secondary)
+            #else
+            searchBar(resultCount: rows.count)
+            #endif
             if busy { ProgressView("설정을 읽는 중") }
-            if document.rules.isEmpty {
+            if showsTrackedRule && hasLoaded && rows.isEmpty {
+                ContentUnavailableView("현재 저장된 규칙에서 찾을 수 없습니다", systemImage: "link",
+                                       description: Text("실시간 연결에 사용된 규칙을 찾으려면 해당 규칙 파일을 확인하세요."))
+            } else if document.rules.isEmpty {
                 Spacer()
                 Button("FlClash 설정 가져오기") { importer = true }.frame(maxWidth: .infinity)
                 Spacer()
@@ -107,16 +126,28 @@ struct RulesView: View {
                                 Text("#\(row.position)").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                                 Text(row.rule.displayText).lineLimit(2)
                             }
+                            #if os(macOS)
+                            Text("예상 출구 · \(row.rule.policy.title)").font(.caption)
+                            #else
                             Text(row.rule.policy.title).font(.caption)
+                            #endif
                             if let reason = row.issue {
                                 Label(reason, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange)
                             }
-                        }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                        }
+                        #if os(macOS)
+                        .padding(.vertical, 4)
+                        #endif
+                        .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
                     }.buttonStyle(.plain)
                 }
             }
         }
         .padding()
+        #if os(macOS)
+        .controlSize(.large)
+        .onChange(of: focusedRuleID) { _, value in activeRuleID = value }
+        #endif
         .onAppear {
             guard !hasLoaded else { return }
             hasLoaded = true
@@ -174,6 +205,31 @@ struct RulesView: View {
         .alert("규칙 파일", isPresented: Binding(get: { errorText != nil }, set: { if !$0 { errorText = nil } })) {
             Button("확인") { errorText = nil }
         } message: { Text(errorText ?? "") }
+    }
+
+    private var showsTrackedRule: Bool {
+        #if os(macOS)
+        activeRuleID != nil
+        #else
+        false
+        #endif
+    }
+
+    private func searchBar(resultCount: Int) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                TextField("도메인, 조건 또는 정책 검색", text: $filter).textFieldStyle(.roundedBorder)
+                Button { onlyIssues.toggle() } label: {
+                    Image(systemName: onlyIssues ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
+                }.accessibilityLabel("확인할 규칙만 보기")
+                Button {
+                    let position = (document.rules.firstIndex(where: { $0.kind == "MATCH" }) ?? document.rules.count) + 1
+                    editor = RuleEditorRequest(rule: RoutingRule(kind: "DOMAIN", value: "", policy: .direct), isNew: true, priority: position)
+                } label: { Image(systemName: "plus") }.accessibilityLabel("규칙 추가").disabled(loadFailed)
+            }
+            Text("규칙 \(document.rules.count)개 · 프록시 그룹 \(document.groups.count)개 · 검색 결과 \(resultCount)개")
+                .font(.caption).foregroundStyle(.secondary)
+        }
     }
 
     private func save(_ draft: RoutingDocument) {
@@ -278,7 +334,7 @@ private struct RuleEditorSheet: View {
                 } else {
                     Text(rule.displayText)
                 }
-                Picker("연결 경로", selection: $rule.policy) {
+                Picker(exitLabel, selection: $rule.policy) {
                     ForEach(policies, id: \.self) { Text($0.title).tag($0) }
                 }
                 TextField("우선순위 (1부터)", text: $priority)
@@ -307,7 +363,16 @@ private struct RuleEditorSheet: View {
         }
         .padding()
         #if os(macOS)
+        .controlSize(.large)
         .frame(minWidth: 410, minHeight: 250)
+        #endif
+    }
+
+    private var exitLabel: LocalizedStringKey {
+        #if os(macOS)
+        "예상 출구"
+        #else
+        "연결 경로"
         #endif
     }
 }
@@ -345,7 +410,12 @@ private struct RulePreviewSheet: View {
                         .font(.callout).foregroundStyle(.orange)
                 }
                 if let rule = result.match {
+                    #if os(macOS)
+                    LabeledContent("예상 출구", value: rule.policy.title).textSelection(.enabled)
+                    Text(rule.displayText).font(.callout).textSelection(.enabled)
+                    #else
                     Text("\(rule.displayText) → \(rule.policy.title)").textSelection(.enabled)
+                    #endif
                     if let issue = rule.issue(groups: document.knownTargets, supportsProcess: RoutingDocument.supportsProcess) {
                         Text(issue).foregroundStyle(.orange)
                     }
@@ -366,6 +436,7 @@ private struct RulePreviewSheet: View {
         }
         .padding()
         #if os(macOS)
+        .controlSize(.large)
         .frame(minWidth: 450, minHeight: 360)
         #endif
     }

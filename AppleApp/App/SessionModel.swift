@@ -365,14 +365,14 @@ final class SessionModel: ObservableObject {
         } catch { message = error.localizedDescription }
         await refreshStatus()
     }
-    func connectSelected(host: String, in run: BenchmarkRun) async {
+    func connectSelected(host: String, in run: BenchmarkRun? = nil) async {
         guard !busy, !previewBuild, link.available,
-              run.mode.candidates(configured: candidates).contains(where: { $0.host == host }) else { return }
+              (run?.mode ?? .all).candidates(configured: candidates).contains(where: { $0.host == host }) else { return }
         let original = link, scope = network
         work = "selection"
         defer { work = "" }
         do {
-            active = try await scanner.connectSelected(host: host, runID: run.id, network: scope,
+            active = try await scanner.connectSelected(host: host, runID: run?.id, network: scope,
                 isNetworkCurrent: { self.link == original && self.network == scope })
             message = "\(host)에 연결했습니다."
         } catch { message = error.localizedDescription }

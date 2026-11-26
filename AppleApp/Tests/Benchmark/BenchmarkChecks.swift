@@ -59,6 +59,15 @@ struct BenchmarkChecks {
         let store = try BenchmarkStore(fileURL: root.appendingPathComponent("full-comparison.json"))
         let driver = TrialDriver()
         let scanner = BenchmarkScanner(store: store, driver: driver)
+        for server in candidates {
+            let direct = try await scanner.connectSelected(host: server.host, network: network, isNetworkCurrent: { true })
+            precondition(direct.mode == .direct && direct.selectedHost == server.host && direct.phase == .completed)
+            precondition(direct.httpsRanks.isEmpty && direct.ranks.isEmpty)
+        }
+        precondition(driver.chosen == candidates.map(\.host) && driver.visits.isEmpty)
+        precondition(store.latestServerConnection(deviceID: network.deviceID)?.host == candidates.last?.host)
+        precondition(store.latestServerConnection(deviceID: "other Mac") == nil)
+        driver.chosen = []
         let extended = candidates.filter(\.requiresExtendedAccount)
         precondition(extended.count == 6)
         let failed = extended[0].host
@@ -80,6 +89,7 @@ struct BenchmarkChecks {
         let chosen = extended.last!.host
         let selected = try await scanner.connectSelected(host: chosen, runID: run.id, network: network, isNetworkCurrent: { true })
         precondition(selected.selectedHost == chosen && driver.chosen == [chosen])
+        precondition(selected.selectedAt != nil && store.latestServerConnection(deviceID: network.deviceID)?.host == chosen)
     }
 
     @MainActor

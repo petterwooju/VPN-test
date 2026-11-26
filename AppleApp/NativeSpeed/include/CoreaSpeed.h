@@ -39,8 +39,8 @@ static inline int csBind(void *opaque, curl_socket_t fd, curlsocktype purpose) {
 static inline size_t csDiscard(char *data, size_t size, size_t count, void *opaque) {
     CSLane *lane = (CSLane *)opaque;
     size_t bytes = size * count;
-    if (bytes > lane->limit - lane->received) return 0;
     lane->received += bytes;
+    if (lane->received > lane->limit) return 0;
     return bytes;
 }
 
@@ -113,12 +113,27 @@ static inline CSLane *csOpen(const char *interface, unsigned int index, const ch
     return lane;
 }
 
-typedef struct { size_t bytes; double responseMS; int success; int requestSent; } CSResult;
+typedef struct {
+    size_t bytes;           // Verified bytes used for throughput.
+    size_t receivedBytes;   // All payload bytes delivered to the callback, even on failure.
+    double responseMS;
+    long httpStatus;
+    int success, requestSent;
+    const char *stage, *errorType, *errorReason;
+} CSResult;
+
 
 static inline CSResult csRequest(CSLane *lane, const char *url, size_t size, const void *payload,
                                  long timeoutMS) {
     CSResult result = {0};
-    if (timeoutMS < 1 || lane->cancelled(lane->context)) return result;
+    result.stage = "request";
+    result.errorType = "setup";
+    result.errorReason = "Could not configure HTTPS request";
+    if (timeoutMS < 1 || lane->cancelled(lane->context)) {
+        result.errorType = timeoutMS < 1 ? "timeout" : "cancelled";
+        result.errorReason = timeoutMS < 1 ? "Measurement deadline reached" : "Cancelled";
+        return result;
+    }
     lane->received = 0;
     lane->limit = payload ? 4096 : size;
     lane->badEncoding = 0;
@@ -135,20 +150,61 @@ static inline CSResult csRequest(CSLane *lane, const char *url, size_t size, con
         result.requestSent = 1;
     long http = 0;
     double total = 0, prepared = 0;
-    if (curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http) != CURLE_OK ||
-        http < 200 || http >= 300 || lane->badEncoding) return result;
-    if (status != CURLE_OK) return result;
+    result.receivedBytes = lane->received;
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http);
+    result.httpStatus = http;
+    result.stage = http ? "body" : result.requestSent ? "response_headers" : "connect";
+    if (http && (http < 200 || http >= 300)) {
+        result.stage = "response_headers";
+        result.errorType = "http_status";
+        result.errorReason = "Unexpected HTTP status";
+        return result;
+    }
+    if (lane->badEncoding) {
+        result.stage = "response_headers";
+        result.errorType = "encoding";
+        result.errorReason = "Unexpected content encoding";
+        return result;
+    }
+    if (!payload && lane->received > size) {
+        result.stage = "end_validation";
+        result.errorType = "length";
+        result.errorReason = "Response exceeded requested size";
+        return result;
+    }
+    if (status != CURLE_OK) {
+        switch (status) {
+            case CURLE_OPERATION_TIMEDOUT: result.errorType = "timeout"; break;
+            case CURLE_PARTIAL_FILE: case CURLE_GOT_NOTHING: result.errorType = "early_eof"; break;
+            case CURLE_SSL_CONNECT_ERROR: case CURLE_PEER_FAILED_VERIFICATION:
+                result.stage = "tls"; result.errorType = "tls"; break;
+            default: result.errorType = "curl"; break;
+        }
+        result.errorReason = curl_easy_strerror(status);
+        return result;
+    }
+    if (!http) {
+        result.errorType = "http_status";
+        result.errorReason = "Missing HTTPS response status";
+        return result;
+    }
     if (payload) {
         curl_off_t sent = 0;
         if (curl_easy_getinfo(curl, CURLINFO_SIZE_UPLOAD_T, &sent) != CURLE_OK || sent != (curl_off_t)size)
             return result;
     }
-    if (!payload && lane->received != size) return result;
+    if (!payload && lane->received != size) {
+        result.errorType = "early_eof";
+        result.errorReason = "Response ended before requested size";
+        return result;
+    }
     if (curl_easy_getinfo(curl, CURLINFO_TOTAL_TIME, &total) != CURLE_OK ||
         curl_easy_getinfo(curl, CURLINFO_PRETRANSFER_TIME, &prepared) != CURLE_OK || total < prepared) return result;
     result.bytes = payload ? size : lane->received;
     result.responseMS = (total - prepared) * 1000.0;
     result.success = 1;
+    result.stage = "complete";
+    result.errorType = result.errorReason = NULL;
     return result;
 }
 

@@ -86,6 +86,45 @@ final class MacRouting: ObservableObject {
         }
         enabled = manager?.isEnabled == true
     }
+
+    func liveConnections() async throws -> LiveConnectionSnapshot {
+        try Task.checkCancellation()
+        guard let manager, manager.isEnabled else {
+            throw ClientIssue.message("CoreaVPN 라우팅 확장이 꺼져 있습니다.")
+        }
+        guard let session = manager.connection as? NETunnelProviderSession, session.status == .connected else {
+            throw ClientIssue.message("CoreaVPN 라우팅 확장의 연결을 기다리는 중입니다.")
+        }
+        let connectedDate = session.connectedDate
+        let (replies, reply) = AsyncThrowingStream<Data, Error>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        // A separate, non-plist request means older providers reject it before their binding update path.
+        try session.sendProviderMessage(Data("CoreaVPN.live-connections.v1".utf8)) { data in
+            guard let data, data.count <= 1024 * 1024 else {
+                reply.finish(throwing: ClientIssue.message("라우팅 확장의 연결 목록을 받을 수 없습니다. 확장 버전을 확인하세요."))
+                return
+            }
+            reply.yield(data)
+            reply.finish()
+        }
+        let timeout = Task {
+            try await Task.sleep(for: .seconds(2))
+            reply.finish(throwing: ClientIssue.message("라우팅 확장의 연결 목록 응답이 지연되고 있습니다."))
+        }
+        defer { timeout.cancel(); reply.finish() }
+        var iterator = replies.makeAsyncIterator()
+        let response = try await iterator.next()
+        try Task.checkCancellation()
+        guard let response, self.manager === manager, manager.isEnabled, session.status == .connected,
+              session.connectedDate == connectedDate else {
+            throw ClientIssue.message("CoreaVPN 라우팅 세션이 변경되었습니다.")
+        }
+        guard let snapshot = try? JSONDecoder().decode(LiveConnectionSnapshot.self, from: response),
+              snapshot.version == 1, snapshot.connections.count <= 128, snapshot.total >= snapshot.connections.count,
+              Set(snapshot.connections.map(\.id)).count == snapshot.connections.count else {
+            throw ClientIssue.message("라우팅 확장의 연결 목록 형식을 확인할 수 없습니다.")
+        }
+        return snapshot
+    }
     func importLeaf(_ leaf: ImportedProxyLeaf, name: String, fingerprint: String) throws {
         let config = try leaf.configuration(verifiedName: name, trustedPin: fingerprint)
         try nodes.store(config, name: leaf.name)
