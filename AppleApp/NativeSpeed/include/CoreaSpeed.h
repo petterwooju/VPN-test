@@ -137,14 +137,13 @@ static inline CSResult csRequest(CSLane *lane, const char *url, size_t size, con
     double total = 0, prepared = 0;
     if (curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http) != CURLE_OK ||
         http < 200 || http >= 300 || lane->badEncoding) return result;
-    // A time-limited download has transferred real response bytes. Uploads count only acknowledged bodies.
-    if (status != CURLE_OK && !(status == CURLE_OPERATION_TIMEDOUT && !payload && lane->received)) return result;
+    if (status != CURLE_OK) return result;
     if (payload) {
         curl_off_t sent = 0;
         if (curl_easy_getinfo(curl, CURLINFO_SIZE_UPLOAD_T, &sent) != CURLE_OK || sent != (curl_off_t)size)
             return result;
     }
-    if (!payload && status == CURLE_OK && lane->received != size) return result;
+    if (!payload && lane->received != size) return result;
     if (curl_easy_getinfo(curl, CURLINFO_TOTAL_TIME, &total) != CURLE_OK ||
         curl_easy_getinfo(curl, CURLINFO_PRETRANSFER_TIME, &prepared) != CURLE_OK || total < prepared) return result;
     result.bytes = payload ? size : lane->received;

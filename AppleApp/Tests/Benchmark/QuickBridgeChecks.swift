@@ -361,6 +361,26 @@ import Foundation
         let relaunched = LocalQuickSearch(workspace: runtime, defaults: defaults, pilotLockHeld: { false })
         precondition(relaunched.comparisonReady && relaunched.comparisonID == importedStore.runs.first?.id)
         precondition(relaunched.comparisonRows == importedStore.runs.first?.rows && relaunched.retainedHost == nil)
+        // A legacy standalone download can look successful in the result while timed-out
+        // data lanes are documented in the worker log. Warm-up failures are independent.
+        try json([host], "quick-hosts.json")
+        try writeEvents([cliStart] + Array(validEvents.prefix(5)) + [
+            ["stage": "verify-stable-flclash-proxy", "ok": true], cliEnd])
+        let diagnostic = runtime.appendingPathComponent("single-server-diagnostic")
+        try FileManager.default.copyItem(at: run, to: diagnostic)
+        let log = diagnostic.appendingPathComponent("worker.log")
+        try Data("download read failed after 10/65536 bytes: timeout: warmup".utf8).write(to: log)
+        added = try observer.importComparison(from: diagnostic, into: network, store: importedStore)
+        precondition(added && observer.comparisonRows.first(where: { $0.host == host })?.httpsSample?.downloadMbps == 130.5)
+        try Data("download read failed after 1000/4194304 bytes: timeout: slow".utf8).write(to: log)
+        added = try observer.importComparison(from: diagnostic, into: network, store: importedStore)
+        precondition(added)
+        let corrected = observer.comparisonRows.first { $0.host == host }
+        precondition(corrected?.httpsError?.contains("측정 실패") == true && corrected?.outcome == .partial)
+        precondition(corrected?.httpsSample?.downloadMbps == nil && corrected?.httpsSample?.uploadMbps == 20.5)
+        try FileManager.default.removeItem(at: log)
+        added = try observer.importComparison(from: diagnostic, into: network, store: importedStore)
+        precondition(!added && observer.comparisonRows.first(where: { $0.host == host }) == corrected)
         print("Local bridge checks passed (independent quick criteria, paired tunnel evidence, recovery, manual selection and idempotent historical import across restart)")
 
     }

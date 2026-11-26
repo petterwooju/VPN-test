@@ -131,13 +131,35 @@ class HTTPSSpeedTests(unittest.TestCase):
         self.assertIsNone(speed.latency_request(channel, speed.time.monotonic() + 1, notified))
         notified.assert_not_called()
 
-    def test_download_timeout_keeps_only_received_bytes(self):
+    def test_timeout_after_receiving_bytes_fails_the_download(self):
         response = MagicMock(length=100)
         response.read1.side_effect = [b"x" * 37, TimeoutError()]
         peer_socket = Mock()
         channel = Mock()
         channel.response.return_value = response, peer_socket
-        self.assertEqual(speed.receive(channel, 100, speed.time.monotonic() + 1), 37)
+        with self.assertRaises(TimeoutError):
+            speed.receive(channel, 100, speed.time.monotonic() + 1)
+
+    def test_one_incomplete_download_lane_invalidates_rate_but_keeps_other_measurements(self):
+        complete = speed.DOWNLOAD_PER_CONNECTION
+        now = speed.time.monotonic()
+        with patch.object(speed, "prepare_lane", return_value=Mock()), \
+             patch.object(speed, "latency_request", return_value=50), \
+             patch.object(speed, "transfer_lane", side_effect=[(n, now + 1) for n in (complete, 0, complete, complete)]):
+            failed_download = speed.transfer_phase(Mock(), Mock())
+        self.assertIsNone(failed_download[0])
+        with patch.object(speed, "route_interface", return_value=TUNNEL), \
+             patch.object(speed.socket, "if_nametoindex", return_value=7), \
+             patch.object(speed, "BoundHTTPSConnection"), \
+             patch.object(speed, "latency_request", side_effect=latency_responses([50] * 20)), \
+             patch.object(speed, "transfer_phase", side_effect=[failed_download, (200000, 1, 70)]):
+            record = speed.measure(HOST, PEER, TUNNEL)
+        self.assertTrue(record["valid"])
+        self.assertIn("Incomplete parallel download", record["errors"]["download"])
+        self.assertEqual(record["speed"]["received"], 20)
+        self.assertEqual(record["speed"]["upload_mbps"], 1.6)
+        for field in ("download_mbps", "download_seconds", "download_bytes"):
+            self.assertIsNone(record["speed"].get(field))
 
     def test_upload_counts_only_accepted_blocks(self):
         response = MagicMock(length=0)

@@ -103,15 +103,17 @@ struct PingSample: Codable, Equatable {
 
 struct HTTPSBenchmarkSample: Codable, Equatable {
     static let target = "speed.cloudflare.com"
+    static let quickMinimumMbps = 50
+    static var quickConnectionTitle: String { "FAST 다운로드 \(quickMinimumMbps)Mbps 이상 서버 연결" }
     static let probeCount = 20
     let sent: Int
     let received: Int
     let averageMS: Double?
-    let downloadMbps: Double?
+    var downloadMbps: Double?
     var uploadMbps: Double?
     let downloadLoadedMS: Double?
     let uploadLoadedMS: Double?
-    let downloadBytes: Int?
+    var downloadBytes: Int?
     var uploadBytes: Int?
     var downloadSeconds: Double? = nil
     var uploadSeconds: Double? = nil
@@ -149,7 +151,7 @@ struct HTTPSBenchmarkSample: Codable, Equatable {
         return measured.isFinite && abs(measured - rate) <= 1e-9 * max(measured, rate)
     }
     var qualifies: Bool {
-        (downloadMbps ?? 0) >= 10 && Self.matches(downloadMbps, bytes: downloadBytes, seconds: downloadSeconds)
+        (downloadMbps ?? 0) >= Double(Self.quickMinimumMbps) && Self.matches(downloadMbps, bytes: downloadBytes, seconds: downloadSeconds)
     }
 
     mutating func discardUnconfirmedUpload() {

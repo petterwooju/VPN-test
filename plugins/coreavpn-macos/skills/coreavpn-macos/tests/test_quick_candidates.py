@@ -12,7 +12,7 @@ import quick_candidates as quick
 PEER = "104.16.44.99"
 
 
-def result(host, mean=100, received=20, rate=12.3):
+def result(host, mean=100, received=20, rate=52.3):
     return dict(valid=True, measurement="https", server=host, target="speed.cloudflare.com",
                 peer_ipv4=PEER, tunnel="ipsec4",
                 speed=dict(sent=20, received=received, average_ms=mean, download_mbps=rate, download_seconds=8 * 400 / (1_000_000 * rate), upload_mbps=5.6,
@@ -117,7 +117,7 @@ class QuickCandidatesTests(unittest.TestCase):
         self.assertEqual(quick.candidate_order([other]), [other])
         with self.assertRaises(ValueError):
             quick.candidate_order(["unknown.coreavpn.net"])
-        for rate, eligible in ((10, True), (9.99, False), (12, True)):
+        for rate, eligible in ((50, True), (49.9999, False), (10, False), (52, True)):
             with self.subTest(rate=rate):
                 sample = result(other, mean=150, received=1, rate=rate)
                 sample["speed"].update(upload_mbps=None, upload_bytes=0)
@@ -127,7 +127,7 @@ class QuickCandidatesTests(unittest.TestCase):
 
     def test_incomplete_or_inconsistent_sample_does_not_qualify(self):
         for speed in ({"download_bytes": 0}, {"download_mbps": -1}, {"download_mbps": float("inf")},
-                      {"download_mbps": 21}, {"download_seconds": 0}, {"download_seconds": None}):
+                      {"download_mbps": 61}, {"download_seconds": 0}, {"download_seconds": None}):
             with self.subTest(speed=speed):
                 sample = result(quick.LEO, received=18)
                 sample["speed"].update(speed)
@@ -247,7 +247,7 @@ class QuickCandidatesTests(unittest.TestCase):
                 self.assertTrue(any(Path(argument).name == expected_script for argument in argv))
                 fixture = ping_result if measurement == "icmp" else result
                 if measurement == "https":
-                    return json.dumps(fixture(host, rate=9.99 if host == quick.LEO else 10))
+                    return json.dumps(fixture(host, rate=49.99 if host == quick.LEO else 50))
                 return json.dumps(fixture(host, 68, 17 if host == quick.LEO else 18))
             hosts = [quick.LEO, "puma.coreavpn.net"]
             plan = dict(device="en6", service="Ethernet", physical_address="10.0.1.2", quick_search=True,

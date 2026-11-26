@@ -227,7 +227,7 @@ final class BenchmarkScanner {
                             value == nil ? label : nil
                         }
                         if !missing.isEmpty {
-                            row.httpsError = missing.joined(separator: " · ") + " 측정 미완료"
+                            row.httpsError = missing.joined(separator: " · ") + " 측정 실패"
                         }
                     } catch {
                         try propagateInterrupt(error)

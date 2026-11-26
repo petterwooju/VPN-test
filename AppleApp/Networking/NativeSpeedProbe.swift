@@ -40,13 +40,19 @@ enum NativeSpeedProbe {
     }
 
     private struct Transfer {
-        let bytes: Int
+        let bytes: Int?
         let mbps: Double?
         let loadedMS: Double?
         let seconds: Double?
     }
     private static func mean(_ values: [Double]) -> Double? {
         values.isEmpty ? nil : values.reduce(0, +) / Double(values.count)
+    }
+
+    private static let downloadSize = 4 * 1024 * 1024
+
+    static func completedDownloadBytes(_ total: Int, lanes: Int) -> Int? {
+        lanes > 0 && total == lanes * downloadSize ? total : nil
     }
 
     private static func phase(interface: String, index: UInt32, peer: String, upload: Bool, idle: Lane) async throws -> Transfer {
@@ -100,7 +106,8 @@ enum NativeSpeedProbe {
                             }
                             return count
                         }
-                        return lane.request(size: 4 * 1024 * 1024, timeout: 6000).bytes
+                        let left = Int((start + 6 - now) * 1000)
+                        return lane.request(size: downloadSize, timeout: left).bytes
                     }) ?? 0
                     return (count, now)
                 }
@@ -114,8 +121,12 @@ enum NativeSpeedProbe {
         let measuredLatencies = await loaded.value.filter { $0.0 <= lastCompletion }.map(\.1)
         try Task.checkCancellation()
         let duration = lastCompletion - start
-        return Transfer(bytes: bytes, mbps: bytes > 0 && duration > 0 ? Double(bytes) * 8 / duration / 1_000_000 : nil,
-                        loadedMS: mean(measuredLatencies), seconds: bytes > 0 && duration > 0 ? duration : nil)
+        let completed = upload ? bytes : completedDownloadBytes(bytes, lanes: lanes.count)
+        guard let completed, completed > 0, duration > 0 else {
+            return Transfer(bytes: completed, mbps: nil, loadedMS: mean(measuredLatencies), seconds: nil)
+        }
+        return Transfer(bytes: completed, mbps: Double(completed) * 8 / duration / 1_000_000,
+                        loadedMS: mean(measuredLatencies), seconds: duration)
     }
 
     @MainActor static func measure(interface: String, validate: @escaping (String) throws -> Void,

@@ -189,7 +189,11 @@ final class LocalQuickSearch: ObservableObject {
         record.phase = .completed
         record.finished = end
         record.message = "로컬 전체 검사 · " + source.lastPathComponent
-        record.rows = pairedRows(request: receipt, events: events, stopped: false)
+        let originalRows = pairedRows(request: receipt, events: events, stopped: false)
+        record.rows = originalRows
+        let failedHost = Self.timedOutDownload(in: source, hosts: hosts, events: events)
+            ?? Self.timedOutDownload(in: dest, hosts: hosts, events: events)
+        Self.applyDownloadFailure(failedHost, to: &record.rows)
         let existing = store.runs.first { $0.id == id }
         var updatedExisting: BenchmarkRun?
         if var existing {
@@ -197,7 +201,10 @@ final class LocalQuickSearch: ObservableObject {
             for index in existing.rows.indices {
                 let saved = existing.rows[index]
                 guard let current = record.rows.first(where: { $0.host == saved.host }) else { throw BenchmarkError.corruptStore }
-                let enriched = saved.httpsSample?.restoringTimes(from: current.httpsSample)
+                let original = originalRows.first { $0.host == saved.host }?.httpsSample
+                let restored = saved.httpsSample?.restoringTimes(from: current.httpsSample)
+                let enriched = saved.host == failedHost && saved.httpsSample?.restoringTimes(from: original) == original
+                    ? current.httpsSample : restored
                 if enriched != saved.httpsSample {
                     existing.rows[index].httpsSample = enriched
                     restoredTimes = true
@@ -229,6 +236,12 @@ final class LocalQuickSearch: ObservableObject {
             defer { try? fm.removeItem(at: stage) }
             for (name, data) in reports { try data.write(to: stage.appendingPathComponent(name), options: .atomic) }
             try fm.moveItem(at: stage, to: dest)
+        }
+        if let failedHost {
+            // Persist only the attribution, leaving the archived and source probe reports immutable.
+            let marker = dest.appendingPathComponent("timed-out-download.txt")
+            let data = Data(failedHost.utf8)
+            if LocalTerminal.read(marker, limit: 256) != data { try data.write(to: marker, options: .atomic) }
         }
         if let updatedExisting { try store.save(updatedExisting) }
         else if existing == nil { try store.save(record) }
@@ -502,7 +515,34 @@ final class LocalQuickSearch: ObservableObject {
         let plan = LocalTerminal.read(dir.appendingPathComponent("plan.json"), limit: 128 * 1024)
             .flatMap { try? JSONDecoder().decode(Plan.self, from: $0) }
         comparisonReady = Self.ready(comparison, state, plan, recovered, events)
-        comparisonRows = pairedRows(request: comparison, events: events, stopped: state?.phase == "released")
+        var rows = pairedRows(request: comparison, events: events, stopped: state?.phase == "released")
+        Self.applyDownloadFailure(Self.timedOutDownload(in: dir, hosts: comparison.hosts, events: events), to: &rows)
+        comparisonRows = rows
+    }
+
+    // Older diagnostic workers emitted lane errors without a hostname. Attribute these only when
+    // the entire run contains exactly one attempt and it matches the requested server.
+    private static func timedOutDownload(in directory: URL, hosts: [String], events: [Event]) -> String? {
+        guard hosts.count == 1, events.filter({ $0.stage == "server-start" }).compactMap(\.server) == hosts else { return nil }
+        let host = hosts[0]
+        if LocalTerminal.read(directory.appendingPathComponent("timed-out-download.txt"), limit: 256) == Data(host.utf8) { return host }
+        guard let data = LocalTerminal.read(directory.appendingPathComponent("worker.log"), limit: 131_072),
+              let log = String(data: data, encoding: .utf8) else { return nil }
+        // 4 MiB is the measured transfer in that diagnostic format. Warm-up reads were 64 KiB.
+        let timeout = #"(?m)^download read failed after [0-9]+/4194304 bytes: timeout:"#
+        return log.range(of: timeout, options: .regularExpression) == nil ? nil : host
+    }
+
+    private static func applyDownloadFailure(_ host: String?, to rows: inout [BenchmarkAttempt]) {
+        guard let host, let index = rows.firstIndex(where: { $0.host == host }),
+              var sample = rows[index].httpsSample else { return }
+        sample.downloadMbps = nil
+        sample.downloadSeconds = nil
+        sample.downloadBytes = nil
+        rows[index].httpsSample = sample
+        rows[index].outcome = .partial
+        let reason = "다운로드 측정 실패 · 병렬 전송 시간 초과"
+        rows[index].httpsError = [reason, rows[index].httpsError].compactMap { $0 }.joined(separator: " · ")
     }
 
     private static func ready(_ comparison: Request, _ state: State?, _ plan: Plan?, _ recovered: Recovery?, _ events: [Event]) -> Bool {
@@ -599,6 +639,8 @@ final class LocalQuickSearch: ObservableObject {
             return label + " 전송량 미확인"
         case "HTTPS " + direction + ": No warmed TLS connection":
             return label + " 측정용 TLS 연결 준비 실패"
+        case "HTTPS download: Incomplete parallel download":
+            return "다운로드 측정 실패 · 병렬 전송 미완료"
         case "HTTPS download: No response payload bytes received":
             return "다운로드 응답 데이터 미수신"
         case "HTTPS upload: No upload block acknowledged by the server":

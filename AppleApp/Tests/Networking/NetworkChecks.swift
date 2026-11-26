@@ -46,6 +46,10 @@ import CoreaSpeed
         precondition(!TunnelProbe.isTunnel("en6") && !TunnelProbe.isTunnel("ipsec"))
 
         #if os(macOS)
+        let laneBytes = 4 * 1024 * 1024
+        precondition(NativeSpeedProbe.completedDownloadBytes(laneBytes * 4, lanes: 4) == laneBytes * 4)
+        precondition(NativeSpeedProbe.completedDownloadBytes(laneBytes, lanes: 4) == nil)
+        precondition(NativeSpeedProbe.completedDownloadBytes(laneBytes * 4 - 1, lanes: 4) == nil)
         // Exercise the transport parser and vanished-interface guard without sending traffic.
         precondition(csOpen("unavailable42", 0, "1.1.1.1", { _ in 0 }, nil) == nil)
         for (encoding, shouldReject) in [("identity", false), ("gzip", true), ("identity-other", true)] {

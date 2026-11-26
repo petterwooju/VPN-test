@@ -42,6 +42,7 @@ struct ServerComparisonTable: View {
         }
 
         func cell(_ row: BenchmarkAttempt) -> String {
+            if self == .download, row.downloadFailed { return "측정 실패" }
             if self == .replies, let p = row.sample {
                 return "\(p.received)/\(p.sent) (\(p.lossPercent.formatted())%)"
             }

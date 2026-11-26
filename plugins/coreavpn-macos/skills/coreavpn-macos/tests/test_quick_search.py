@@ -52,7 +52,7 @@ def search(run, plan, cancelled):
                 "target": "168.126.63.1", "tunnel": "ipsec4",
                 "ping": {"sent": 20, "received": received, "average_ms": 100, "minimum_ms": 80,
                          "maximum_ms": 125, "loss_pct": 100 * (20 - received) / 20}}
-    rate = 9.99 if plan["mode"] == "invalid" else 123
+    rate = 49.99 if plan["mode"] == "invalid" else 123
     return {"valid": True, "measurement": "https", "server": "leo.coreavpn.net", "target": "speed.cloudflare.com",
             "peer_ipv4": "104.16.44.99", "tunnel": "ipsec4",
             "speed": {"sent": 20, "received": received, "average_ms": 100.001 if plan["mode"] == "invalid" else 100.0,

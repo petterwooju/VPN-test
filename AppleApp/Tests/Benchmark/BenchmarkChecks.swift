@@ -213,25 +213,25 @@ struct BenchmarkChecks {
         driver.results[hosts[0]] = try PingSample(sent: 20, received: 19, meanMS: 25)
         driver.results[hosts[1]] = try PingSample(sent: 20, received: 20, meanMS: 100)
         driver.results[hosts[2]] = try PingSample(sent: 20, received: 0, meanMS: nil)
-        let downloadable = HTTPSBenchmarkSample(sent: 20, received: 17, averageMS: 150, downloadMbps: 12,
+        let downloadable = HTTPSBenchmarkSample(sent: 20, received: 17, averageMS: 150, downloadMbps: 52,
                                      uploadMbps: nil, downloadLoadedMS: 220, uploadLoadedMS: nil,
-                                     downloadBytes: 12_000_000, uploadBytes: nil, downloadSeconds: 8)
+                                     downloadBytes: 13_000_000, uploadBytes: nil, downloadSeconds: 2)
         func qualifies(_ rate: Double, seconds: Double?) -> Bool {
             HTTPSBenchmarkSample(sent: 20, received: 0, averageMS: nil, downloadMbps: rate, uploadMbps: nil,
-                                 downloadLoadedMS: nil, uploadLoadedMS: nil, downloadBytes: 1_250_000,
+                                 downloadLoadedMS: nil, uploadLoadedMS: nil, downloadBytes: 6_250_000,
                                  uploadBytes: nil, downloadSeconds: seconds).qualifies
         }
-        precondition(qualifies(10, seconds: 1) && !qualifies(9.99, seconds: 10 / 9.99))
-        precondition(!qualifies(10, seconds: nil) && !qualifies(10, seconds: 0) && !qualifies(10, seconds: 2))
-        precondition(!qualifies(10, seconds: .nan) && !qualifies(10, seconds: .infinity))
-        precondition(qualifies(10.000000001, seconds: 1) && !qualifies(10.0001, seconds: 1))
+        precondition(qualifies(50, seconds: 1) && !qualifies(49.9999, seconds: 50 / 49.9999))
+        precondition(!qualifies(50, seconds: nil) && !qualifies(50, seconds: 0) && !qualifies(50, seconds: 2))
+        precondition(!qualifies(50, seconds: .nan) && !qualifies(50, seconds: .infinity))
+        precondition(qualifies(50.000000001, seconds: 1) && !qualifies(50.0001, seconds: 1))
         driver.speeds[hosts[2]] = downloadable
         let scan = BenchmarkScanner(store: store, driver: driver)
         let all = try await scan.run(mode: .all, network: network, candidates: candidate)
         precondition(all.phase == .completed && all.selectedHost == nil && driver.state == baseline && driver.chosen.isEmpty)
         precondition(all.rows.count == 23 && driver.visits == hosts)
         let mixed = all.rows.first { $0.host == hosts[2] }!
-        precondition(mixed.outcome == .partial && mixed.sample?.received == 0 && mixed.httpsSample?.downloadMbps == 12)
+        precondition(mixed.outcome == .partial && mixed.sample?.received == 0 && mixed.httpsSample?.downloadMbps == 52)
         let chosen = try await scan.connectSelected(host: hosts[0], runID: all.id, network: network, isNetworkCurrent: { true })
         precondition(chosen.selectedHost == hosts[0] && driver.chosen == [hosts[0]])
         let beforeFailedSelection = driver.state

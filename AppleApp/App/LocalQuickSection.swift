@@ -35,7 +35,7 @@ struct LocalQuickSection: View {
             .accessibilityIdentifier("quick-start")
             .disabled(blocked || model.candidates.isEmpty)
             Button { run(.https) } label: {
-                Label("FAST 다운로드 10Mbps 이상 서버 연결", systemImage: "arrow.down.circle")
+                Label(HTTPSBenchmarkSample.quickConnectionTitle, systemImage: "arrow.down.circle")
             }
             .accessibilityIdentifier("quick-fast-start")
             .disabled(blocked || model.candidates.isEmpty)
@@ -58,7 +58,7 @@ struct LocalQuickSection: View {
             }
             ForEach(quick.results) { attempt in
                 if let sample = attempt.httpsSample {
-                    HTTPSMeasurementRow(host: attempt.host, sample: sample)
+                    HTTPSMeasurementRow(host: attempt.host, sample: sample, downloadFailed: attempt.downloadFailed)
                 } else if let sample = attempt.sample {
                     LabeledContent(attempt.host) {
                         Text("\(sample.received)/\(sample.sent) · " +

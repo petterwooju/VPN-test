@@ -145,7 +145,7 @@ struct ConnectionView: View {
                     if !usesLocalSearch {
                         action("168.126.63.1 100ms 이하 서버 연결", "bolt.horizontal", needsVPN: true) { Task { await model.start(.quick) } }
                         #if os(macOS)
-                        action("FAST 다운로드 10Mbps 이상 서버 연결", "arrow.down.circle", needsVPN: true) { Task { await model.start(.fastQuick) } }
+                        action(HTTPSBenchmarkSample.quickConnectionTitle, "arrow.down.circle", needsVPN: true) { Task { await model.start(.fastQuick) } }
                         action("전체 테스트 후 서버 선택", "list.number", needsVPN: true) { Task { await model.start(.all) } }
                         #else
                         action("전체 테스트 후 최적 서버 연결", "list.number", needsVPN: true) { Task { await model.start(.all) } }

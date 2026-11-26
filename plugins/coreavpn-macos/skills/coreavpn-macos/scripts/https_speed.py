@@ -144,20 +144,15 @@ def receive(connection, size, deadline):
     with response:
         if response.length is not None and response.length != size:
             raise http.client.HTTPException("Unexpected HTTPS download size")
-        try:
-            while count < size:
-                peer_socket.settimeout(remaining(deadline))
-                block = response.read1(min(64 * 1024, size - count))
-                if not block:
-                    raise http.client.HTTPException("Incomplete HTTPS download")
-                count += len(block)
+        while count < size:
             peer_socket.settimeout(remaining(deadline))
-            if response.read(1):
-                raise http.client.HTTPException("HTTPS download exceeded the requested size")
-        except TimeoutError:
-            # Bytes already delivered are valid throughput evidence when a slow
-            # transfer reaches the measurement deadline.
-            return count
+            block = response.read1(min(64 * 1024, size - count))
+            if not block:
+                raise http.client.HTTPException("Incomplete HTTPS download")
+            count += len(block)
+        peer_socket.settimeout(remaining(deadline))
+        if response.read(1):
+            raise http.client.HTTPException("HTTPS download exceeded the requested size")
     return count
 
 
@@ -227,6 +222,8 @@ def transfer_phase(new_connection, latency_connection, *, upload=False):
                 connection.close()
     count = sum(size for size, _ in results)
     duration = max(finished for _, finished in results) - started
+    if not upload and count != len(connections) * DOWNLOAD_PER_CONNECTION:
+        count = None  # A failed lane invalidates the entire download rate.
     return count, duration, mean(loaded) if loaded else None
 
 
@@ -285,7 +282,8 @@ def measure(server, peer_ipv4, tunnel, download_checkpoint=None, idle_checkpoint
                         stats[mode + "_mbps"] = 8 * size / (1_000_000 * elapsed)
                         stats[mode + "_seconds"] = elapsed
                     else:
-                        reason = ("No warmed TLS connection" if elapsed is None else
+                        reason = ("Incomplete parallel download" if size is None else
+                                  "No warmed TLS connection" if elapsed is None else
                                   "No response payload bytes received" if mode == "download" else
                                   "No upload block acknowledged by the server")
                         entry.setdefault("errors", {})[mode] = f"HTTPS {mode}: {reason}"

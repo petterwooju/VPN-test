@@ -16,7 +16,7 @@ extension AttemptOutcome {
 }
 extension ScanMode {
     var displayName: String {
-        switch self { case .all: return "전체 검사"; case .quick: return "빠른 연결"; case .fastQuick: return "FAST 다운로드 10Mbps 검색"; case .puma: return "Puma 점검" }
+        switch self { case .all: return "전체 검사"; case .quick: return "빠른 연결"; case .fastQuick: return "FAST 다운로드 빠른 연결"; case .puma: return "Puma 점검" }
     }
 }
 extension ScanPhase {
@@ -25,9 +25,16 @@ extension ScanPhase {
     }
 }
 
+extension BenchmarkAttempt {
+    var downloadFailed: Bool {
+        httpsSample?.downloadMbps == nil && httpsError?.contains("다운로드") == true
+    }
+}
+
 struct HTTPSMeasurementRow: View {
     let host: String
     let sample: HTTPSBenchmarkSample
+    var downloadFailed = false
 
     private func speed(_ value: Double?) -> String { value.map { String(format: "%.1f Mbps", $0) } ?? "측정값 없음" }
     private func latency(_ value: Double?) -> String { value.map { String(format: "%.1f ms", $0) } ?? "측정값 없음" }
@@ -35,7 +42,7 @@ struct HTTPSMeasurementRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(host)
-            Text("다운로드 \(speed(sample.downloadMbps)) · 업로드 \(speed(sample.uploadMbps))")
+            Text("다운로드 \(downloadFailed ? "측정 실패" : speed(sample.downloadMbps)) · 업로드 \(speed(sample.uploadMbps))")
             Text("평상시 \(latency(sample.averageMS)) · 다운로드 중 \(latency(sample.downloadLoadedMS)) · 업로드 중 \(latency(sample.uploadLoadedMS))")
             Text("HTTPS 응답 \(sample.received)/\(sample.sent)")
         }.font(.caption).foregroundStyle(.secondary)
@@ -125,7 +132,8 @@ struct HistoryView: View {
                                         Text("ICMP 미측정")
                                     }
                                     if let speed = row.httpsSample {
-                                        HTTPSMeasurementRow(host: HTTPSBenchmarkSample.target, sample: speed)
+                                        HTTPSMeasurementRow(host: HTTPSBenchmarkSample.target, sample: speed,
+                                                            downloadFailed: row.downloadFailed)
                                     }
                                     if let error = row.pingError { Text("ping · " + error) }
                                     if let error = row.httpsError { Text("FAST · " + error) }
